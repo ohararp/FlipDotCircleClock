@@ -8,7 +8,6 @@ import displayio
 import terminalio
 import simpleio
 import random as r
-import sys
 
 #RTC Libraries
 import adafruit_ds3231
@@ -600,107 +599,149 @@ class timeOut:
 
 #%%----------------------------------------------------------------------------
 def getWifiTime():
-    # Connect WiFi, fetch time, set RTC, and update OLED/DotStar.
+    # Connect WiFi, fetch network time, update RTC, and return status dictionary.
     global wifiError
-    try:
-        wifiError
-    except NameError:
-        wifiError = False
 
+    # Initialize return structure with safe defaults
+    result = {
+        "ok": False,                         # True if WiFi + time fetch succeeded
+        "wifi_error": False,                 # True if any WiFi or request error
+        "rtc_time": rtc.datetime,            # Always a time.struct_time
+        "ip": ipaddress.ip_address("0.0.0.0"),  # Default IP if not connected
+        "drift_s": None,                     # RTC vs WiFi drift in seconds
+        "resynced_mech": False,              # True if hands/display were forced
+        "msg": "",                           # Short status message
+    }
+
+    # Reset WiFi error state for this attempt
+    wifiError = False
+
+    # Update UI to show WiFi connection attempt
     setDotstar(PURPLE, 0.25)
     wifiCircle.fill = None
     ucStatus.text = "Connecting to WiFi"
     wifiStatus.text = "---"
     wifiAddress.text = "---"
 
+    # Load WiFi credentials and API keys
     try:
         from secrets import secrets
     except ImportError:
+        result["wifi_error"] = True
+        result["msg"] = "Missing secrets.py"
         print("WiFi secrets are kept in secrets.py, please add them there!")
         ucStatus.text = "Check Secrets.py"
+        setDotstar(YELLOW, 0.25)
+        return result
 
     aio_username = secrets["aio_username"]
     aio_key = secrets["aio_key"]
-    location = secrets.get("timezone", None)
 
-    print("My MAC addr:", [hex(i) for i in wifi.radio.mac_address])
-
-    print("Available WiFi networks:")
-    for network in wifi.radio.start_scanning_networks():
-        print("\t%s\t\tRSSI: %d\tChannel: %d" % (
-            str(network.ssid, "utf-8"), network.rssi, network.channel
-        ))
-    wifi.radio.stop_scanning_networks()
-
+    # Attempt to connect to WiFi
     print("Connecting to %s" % secrets["ssid"])
-
     try:
         wifi.radio.connect(secrets["ssid"], secrets["password"])
-    except:
-        wifiError = True
-        t = timeOut("error")
-        ipAddress = ipaddress.ip_address("999.999.99.99")
-        wifiCircle.fill = None
-        wifiAddress.text = str(ipAddress)
+    except Exception as e:
+        result["wifi_error"] = True
+        result["msg"] = "WiFi connect failed"
+        print("WiFi connect failed:", e)
         wifiStatus.text = "WiFi Error"
+        wifiAddress.text = str(result["ip"])
+        setDotstar(YELLOW, 0.25)
+        return result
+
+    # WiFi connected successfully
+    result["ip"] = wifi.radio.ipv4_address
+    print("My IP address is", result["ip"])
+
+    ucStatus.text = "WiFi Available"
+    wifiCircle.fill = 0xFFFFFF
+    wifiStatus.text = secrets["ssid"]
+    wifiAddress.text = str(result["ip"])
+    setDotstar(GREEN, 0.25)
+
+    # Request current time from Adafruit IO
+    try:
+        TIME_URL = (
+            "https://io.adafruit.com/api/v2/%s/integrations/time/struct?x-aio-key=%s"
+            % (aio_username, aio_key)
+        )
+        print("Fetching text from", TIME_URL)
+
+        ucStatus.text = "Sending Request"
+        pool = socketpool.SocketPool(wifi.radio)
+        requests = adafruit_requests.Session(pool, ssl.create_default_context())
+        req = requests.get(TIME_URL)
+
+        # Parse returned JSON time payload
+        t = timeOut(req.text)
+        req.close()
+
+        wifi_struct = time.struct_time(
+            (t.year, t.mon, t.mday, t.hour, t.min, t.sec, t.wday, t.yday, t.isdst)
+        )
+
+        # Compute RTC drift before overwriting RTC
+        rtc_before = rtc.datetime
+        try:
+            result["drift_s"] = abs(
+                time.mktime(wifi_struct) - time.mktime(rtc_before)
+            )
+        except Exception as e:
+            print("Delta calc failed:", e)
+            result["drift_s"] = None
+
+        # Update RTC with WiFi time
+        rtc.datetime = wifi_struct
+        result["rtc_time"] = rtc.datetime
+        ucStatus.text = "RTC update via WiFi"
+
+        # Force mechanical resync if drift exceeds threshold
+        WIFI_RESYNC_THRESHOLD_S = 120
+        if (
+            result["drift_s"] is not None
+            and result["drift_s"] >= WIFI_RESYNC_THRESHOLD_S
+        ):
+            print(
+                "WiFi drift %.1fs, resyncing hands/display"
+                % result["drift_s"]
+            )
+            hrUpdate(forceHour=True)
+            minUpdate()
+            syncOldTrackers()
+            result["resynced_mech"] = True
+
+        result["ok"] = True
+        result["msg"] = "WiFi time applied"
+
+    # Handle HTTP or parsing errors
+    except Exception as e:
+        result["wifi_error"] = True
+        result["msg"] = "Time request failed"
+        print("Request Error - Time Not Updated:", e)
+        ucStatus.text = "Request Error"
+        wifiCircle.fill = None
+        wifiStatus.text = secrets["ssid"]
+        wifiAddress.text = str(result["ip"])
         setDotstar(YELLOW, 0.25)
 
-    if wifiError == False:
-        print("Connected  to %s!" % secrets["ssid"])
-        print("My IP address is", wifi.radio.ipv4_address)
-        ipAddress = wifi.radio.ipv4_address
+    # Final RTC printout for logging
+    t_rtc = rtc.datetime
+    result["rtc_time"] = t_rtc
+    print(
+        "RTC Time  = %d%02d%02d - %02d:%02d:%02d"
+        % (
+            t_rtc.tm_year,
+            t_rtc.tm_mon,
+            t_rtc.tm_mday,
+            t_rtc.tm_hour,
+            t_rtc.tm_min,
+            t_rtc.tm_sec,
+        )
+    )
+    ucStatus.text = " "
 
-        pool = socketpool.SocketPool(wifi.radio)
-        print(pool)
-
-        ucStatus.text = "WiFi Available"
-        wifiCircle.fill = 0xFFFFFF
-        wifiStatus.text = secrets["ssid"]
-        wifiAddress.text = str(ipAddress)
-        setDotstar(GREEN, 0.25)
-
-        try:
-            TIME_URL = "https://io.adafruit.com/api/v2/%s/integrations/time/struct?x-aio-key=%s" % (
-                aio_username, aio_key
-            )
-            print("Fetching text from", TIME_URL)
-
-            ucStatus.text = "Sending Request"
-            requests = adafruit_requests.Session(pool, ssl.create_default_context())
-            print("Requests = %s" % requests)
-            req = requests.get(TIME_URL)
-            t = timeOut(req.text)
-            req.close()
-
-            print("Wifi Time = %d%02d%02d - %02d:%02d:%02d" % (
-                t.year, t.mon, t.mday, t.hour, t.min, t.sec
-            ))
-
-            rtc.datetime = time.struct_time(
-                (t.year, t.mon, t.mday, t.hour, t.min, t.sec, t.wday, t.yday, t.isdst)
-            )
-            print("Set Time  = %d%02d%02d - %02d:%02d:%02d" % (
-                t.year, t.mon, t.mday, t.hour, t.min, t.sec
-            ))
-
-            ucStatus.text = "RTC update via WiFi"
-        except:
-            print("Request Error - Time Not Updated")
-            setDotstar(YELLOW, 0.25)
-            t = timeOut("error")
-            ucStatus.text = "Request Error"
-            wifiCircle.fill = None
-            wifiStatus.text = secrets["ssid"]
-            wifiAddress.text = str(ipAddress)
-            setDotstar(YELLOW, 0.25)
-
-        t = rtc.datetime
-        print("RTC Time  = %d%02d%02d - %02d:%02d:%02d" % (
-            t.tm_year, t.tm_mon, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec
-        ))
-        ucStatus.text = " "
-
-    return [wifiError, t, ipAddress]
+    return result
 
 #------------------------------------------------------------------------------
 def hour24ToHour12(hour24):
@@ -709,7 +750,6 @@ def hour24ToHour12(hour24):
     if hour12 == 0:
         hour12 = 12
     return hour12
-
 #------------------------------------------------------------------------------
 def hourIn(hour):
     # Map hour number to 4-column flipdot bit patterns.
@@ -870,7 +910,14 @@ def hallStable(expected, samples=5, delay=0.0005):
         time.sleep(delay)
     return True
 
-
+#%%----------------------------------------------------------------------------
+def syncOldTrackers():
+    # Sync secOld/minOld/hrOld to RTC so main loop won't re-trigger updates.
+    global secOld, minOld, hrOld
+    t = rtc.datetime
+    secOld = t.tm_sec
+    minOld = t.tm_min
+    hrOld  = t.tm_hour
 #%%----------------------------------------------------------------------------
 # Setup Functions
 #%%----------------------------------------------------------------------------
@@ -887,12 +934,9 @@ i2c = setupI2C()
 rtc = setupRTC(i2c)
 butA,butB,butC = setupButton()
 t = rtc.datetime
-# Re-sync old trackers to current time so loop doesn't fight you
-t = rtc.datetime
-secOld = t.tm_sec
-minOld = t.tm_min
-hrOld  = t.tm_hour
 
+# Re-sync old trackers to current time so loop doesn't fight you
+syncOldTrackers()
 
 # Setup the Display
 [screen, timeArea, ucStatus, wifiCircle, wifiStatus, wifiAddress] = setupScreen(i2c)
@@ -931,7 +975,8 @@ screenUpdate()
 
 # Connect to Wifi
 ucStatus.text = "Connecting to Wifi"
-getWifiTime()
+wifi_status = getWifiTime()
+print(wifi_status["msg"], "ok=", wifi_status["ok"], "ip=", wifi_status["ip"])
 
 #%%----------------------------------------------------------------------------
 # Main
@@ -960,42 +1005,40 @@ while True:
         hourHome()
         hrOld = hrTest
 
-    # Update the Time By Pressing Button A
+    # Begin Button Testing
+    didManualUpdate = False   # Track whether a button caused a time/mech change
+
     if butA.value == 0:
         print("Button A - Pressed")
-        blankDisplay()
+        blankDisplay()        # Clear display before re-animating hour
 
-        # Re-read time after blanking, then animate to the correct hour
         t = rtc.datetime
         numIn = hour24ToHour12(t.tm_hour)
-        roundTo(numIn)
+        roundTo(numIn)        # Animate flipdots to current hour
 
-        magOffset = findExactHome(0.002125)
-        hrUpdate(forceHour=True)
-        minUpdate()
+        magOffset = findExactHome(0.002125)  # Re-home minute hand
+        hrUpdate(forceHour=True)              # Force hour refresh
+        minUpdate()                           # Sync minute hand
 
-        # Re-sync old trackers to current time so loop doesn't fight you
-        t = rtc.datetime
-        secOld = t.tm_sec
-        minOld = t.tm_min
-        hrOld  = t.tm_hour
+        didManualUpdate = True
 
     elif butB.value == 0:
-        setHrs()
-        hrUpdate(forceHour=True)
-        t = rtc.datetime
-        secOld = t.tm_sec
-        minOld = t.tm_min
-        hrOld  = t.tm_hour
+        setHrs()              # Increment RTC hour
+        hrUpdate(forceHour=True)  # Force hour refresh
+        didManualUpdate = True
 
     elif butC.value == 0:
-        setMins()
-        minUpdate()
+        setMins()             # Increment RTC minute
+        minUpdate()           # Sync minute hand
+        didManualUpdate = True
 
-        t = rtc.datetime
-        secOld = t.tm_sec
-        minOld = t.tm_min
-        hrOld  = t.tm_hour
+    else:
+        serviceFlipPowerWindow()  # Handle delayed flipdot power-off
+        time.sleep(0.1)           # Idle delay to limit loop rate
+
+    if didManualUpdate:
+        syncOldTrackers()     # Prevent main loop from re-triggering updates
+
 
     else:
         serviceFlipPowerWindow()
