@@ -75,6 +75,12 @@ relayHoldS      = 0.08   # seconds to keep rails up after last flip
 flipPwrIsOn = False
 flipPwrOffAtS = 0.0
 
+# Init Time Variables
+secOld = 255
+minOld = 255
+hrOld  = 255
+
+
 #%%----------------------------------------------------------------------------
 def getBit(value, bitIdx):
     return value & (1 << bitIdx)
@@ -245,15 +251,20 @@ def invalidateFlipCache():
     oldData = [255, 255, 255, 255]
         
 #%%----------------------------------------------------------------------------
-def setFlips(dataIn, flagXOR, manage_power=True):
-    if manage_power:
+def setFlips(dataIn, flagXOR, managePower=True, forceFull=False, doPrecharge=False):
+    if forceFull:
+        flagXOR = 1
+
+    if managePower:
         flipsPower(True)
         extendFlipPowerWindow()
+        if doPrecharge:
+            time.sleep(relayPrechargeS)
 
     regData = setFlipsCore(dataIn, flagXOR)
 
-    if manage_power:
-        extendFlipPowerWindow()  # extend again after the shift completes
+    if managePower:
+        extendFlipPowerWindow()
 
     return regData
 #%%----------------------------------------------------------------------------
@@ -467,16 +478,21 @@ def mechUpdate(forceHour=False):
         multiStep(1, stepsNeeded, 0.005125)
 
     global lastHourShown
-    hr12 = t.tm_hour if t.tm_hour <= 12 else t.tm_hour - 12
-    hourChanged = (lastHourShown != hr12)
+    hr12 = hour24ToHour12(t.tm_hour)
 
-    if forceHour or hourChanged:
-        blankToBlack()
+    if forceHour or (lastHourShown != hr12):
+        flipsPower(True)
+        try:
+            setFlips([0, 0, 0, 0], 1, managePower=False)   # force black
+            time.sleep(0.05)
 
-        t = rtc.datetime
-        hr12 = t.tm_hour if t.tm_hour <= 12 else t.tm_hour - 12
+            setFlips(hourIn(hr12), 1, managePower=False)   # force hour
+            time.sleep(0.05)
 
-        roundTo(hr12)
+            setFlips(hourIn(hr12), 1, managePower=False)   # small retry
+        finally:
+            extendFlipPowerWindow()
+
         lastHourShown = hr12
 
 #%%----------------------------------------------------------------------------
@@ -648,6 +664,12 @@ def getWifiTime():
     return [wifiError,t,ipAddress]
 
 #------------------------------------------------------------------------------
+def hour24ToHour12(hour24):
+    hour12 = hour24 % 12
+    if hour12 == 0:
+        hour12 = 12
+    return hour12
+#------------------------------------------------------------------------------
 def hourIn(hour):
     # Add an +1 shift to the hour
     # Account for 24 hour format
@@ -709,13 +731,13 @@ def blankDisplay():
 
     flipsPower(True)
     try:
-        setFlips([0, 0, 0, 0], 1, manage_power=False)
+        setFlips([0, 0, 0, 0], 1, managePower=False)
         time.sleep(2.5)
 
-        setFlips([15, 15, 15, 15], 1, manage_power=False)
+        setFlips([15, 15, 15, 15], 1, managePower=False)
         time.sleep(2.5)
 
-        setFlips([0, 0, 0, 0], 1, manage_power=False)
+        setFlips([0, 0, 0, 0], 1, managePower=False)
         time.sleep(2.5)
     finally:
         time.sleep(relayHoldS)
@@ -725,7 +747,7 @@ def blankDisplay():
 def blankToBlack():
     flipsPower(True)
     try:
-        setFlips([0, 0, 0, 0], 1, manage_power=False)
+        setFlips([0, 0, 0, 0], 1, managePower=False)
         time.sleep(0.05)
 
     finally:
@@ -747,7 +769,7 @@ def playAnimation():
     try:
         for frame in frames:
             for col in frame:
-                setFlips(col, 1, manage_power=False)
+                setFlips(col, 1, managePower=False)
                 time.sleep(0.5)
                 led.value = not led.value
     finally:
@@ -764,7 +786,7 @@ def roundAnim():
         for _ in range(2):
             for n in range(0, 13):
                 print(n)
-                setFlips(hourIn(n), 1, manage_power=False)
+                setFlips(hourIn(n), 1, managePower=False)
     finally:
         time.sleep(relayHoldS)
         flipsPower(False)
@@ -773,21 +795,20 @@ def roundAnim():
 def roundTo(numIn):
     time.sleep(0.5)
 
-    if numIn > 12:
-        numIn -= 12
+    numIn = hour24ToHour12(numIn)
 
-    print("RoundTo Animation:", end=" ")
+    print("RoundTo Animation: (",numIn, ")", end=" ")
 
     flipsPower(True)
     try:
         for n in range(0, 12):
             print(n, end=" ")
-            setFlips(hourIn(n), 1, manage_power=False)
+            setFlips(hourIn(n), 1, managePower=False)
             time.sleep(0.5)
 
         print("|", numIn)
 
-        setFlips(hourIn(numIn), 1, manage_power=False)
+        setFlips(hourIn(numIn), 1, managePower=False)
 
         global lastHourShown
         lastHourShown = numIn
@@ -795,7 +816,6 @@ def roundTo(numIn):
         time.sleep(relayHoldS)
         flipsPower(False)
         invalidateFlipCache()
-
 #%%----------------------------------------------------------------------------    
 def hallStable(expected, samples=5, delay=0.0005):
     """
@@ -857,13 +877,6 @@ screenUpdate()
 # Connect to Wifi
 ucStatus.text = "Connecting to Wifi"
 getWifiTime()
-mechUpdate(forceHour=True)
-screenUpdate()
-
-secOld = 255
-minOld = 255
-hrOld  = 255
-
 
 #%%----------------------------------------------------------------------------
 # Main
@@ -912,7 +925,6 @@ while True:
     elif butB.value == 0:
         setHrs()
         mechUpdate(forceHour=True)
-
         t = rtc.datetime
         secOld = t.tm_sec
         minOld = t.tm_min
