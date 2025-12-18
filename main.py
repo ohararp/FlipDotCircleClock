@@ -599,149 +599,137 @@ class timeOut:
 
 #%%----------------------------------------------------------------------------
 def getWifiTime():
-    # Connect WiFi, fetch network time, update RTC, and return status dictionary.
+    # Connect WiFi, fetch time, set RTC, and update OLED/DotStar.
     global wifiError
+    global secOld, minOld, hrOld
 
-    # Initialize return structure with safe defaults
-    result = {
-        "ok": False,                         # True if WiFi + time fetch succeeded
-        "wifi_error": False,                 # True if any WiFi or request error
-        "rtc_time": rtc.datetime,            # Always a time.struct_time
-        "ip": ipaddress.ip_address("0.0.0.0"),  # Default IP if not connected
-        "drift_s": None,                     # RTC vs WiFi drift in seconds
-        "resynced_mech": False,              # True if hands/display were forced
-        "msg": "",                           # Short status message
-    }
+    try:
+        wifiError
+    except NameError:
+        wifiError = False
 
-    # Reset WiFi error state for this attempt
-    wifiError = False
-
-    # Update UI to show WiFi connection attempt
     setDotstar(PURPLE, 0.25)
     wifiCircle.fill = None
-    ucStatus.text = "Connecting to WiFi"
+    ucStatus.text = "Connecting to WiFi"; print("Connecting to WiFi")
     wifiStatus.text = "---"
     wifiAddress.text = "---"
 
-    # Load WiFi credentials and API keys
     try:
         from secrets import secrets
     except ImportError:
-        result["wifi_error"] = True
-        result["msg"] = "Missing secrets.py"
         print("WiFi secrets are kept in secrets.py, please add them there!")
-        ucStatus.text = "Check Secrets.py"
-        setDotstar(YELLOW, 0.25)
-        return result
+        ucStatus.text = "Check Secrets.py"; print("Check Secrets.py")
+        return {"wifiError": True, "rtc_time": rtc.datetime, "ipAddress": None}
 
     aio_username = secrets["aio_username"]
     aio_key = secrets["aio_key"]
+    timezone = secrets.get("timezone", "Etc/UTC")  # e.g. "America/New_York"
 
-    # Attempt to connect to WiFi
+    print("My MAC addr:", [hex(i) for i in wifi.radio.mac_address])
+
+    print("Available WiFi networks:")
+    for network in wifi.radio.start_scanning_networks():
+        print("\t%s\t\tRSSI: %d\tChannel: %d" % (
+            str(network.ssid, "utf-8"), network.rssi, network.channel
+        ))
+    wifi.radio.stop_scanning_networks()
+
     print("Connecting to %s" % secrets["ssid"])
     try:
         wifi.radio.connect(secrets["ssid"], secrets["password"])
-    except Exception as e:
-        result["wifi_error"] = True
-        result["msg"] = "WiFi connect failed"
-        print("WiFi connect failed:", e)
+    except:
+        wifiError = True
+        t = timeOut("error")
+        ipAddress = ipaddress.ip_address("999.999.99.99")
+        wifiCircle.fill = None
+        wifiAddress.text = str(ipAddress)
         wifiStatus.text = "WiFi Error"
-        wifiAddress.text = str(result["ip"])
+        ucStatus.text = "WiFi Error"; print("WiFi Error")
         setDotstar(YELLOW, 0.25)
-        return result
+        return {"wifiError": wifiError, "rtc_time": rtc.datetime, "ipAddress": ipAddress}
 
-    # WiFi connected successfully
-    result["ip"] = wifi.radio.ipv4_address
-    print("My IP address is", result["ip"])
+    print("Connected to %s!" % secrets["ssid"])
+    print("My IP address is", wifi.radio.ipv4_address)
+    ipAddress = wifi.radio.ipv4_address
 
-    ucStatus.text = "WiFi Available"
+    pool = socketpool.SocketPool(wifi.radio)
+
+    ucStatus.text = "WiFi Available"; print("WiFi Available")
     wifiCircle.fill = 0xFFFFFF
     wifiStatus.text = secrets["ssid"]
-    wifiAddress.text = str(result["ip"])
+    wifiAddress.text = str(ipAddress)
     setDotstar(GREEN, 0.25)
 
-    # Request current time from Adafruit IO
     try:
+        # Include tz so Adafruit IO returns local time with DST applied.
         TIME_URL = (
-            "https://io.adafruit.com/api/v2/%s/integrations/time/struct?x-aio-key=%s"
-            % (aio_username, aio_key)
+            "https://io.adafruit.com/api/v2/%s/integrations/time/struct"
+            "?x-aio-key=%s&tz=%s"
+            % (aio_username, aio_key, timezone)
         )
-        print("Fetching text from", TIME_URL)
+        print("Fetching time from", TIME_URL)
 
-        ucStatus.text = "Sending Request"
-        pool = socketpool.SocketPool(wifi.radio)
+        ucStatus.text = "Sending Request"; print("Sending Request")
         requests = adafruit_requests.Session(pool, ssl.create_default_context())
         req = requests.get(TIME_URL)
-
-        # Parse returned JSON time payload
         t = timeOut(req.text)
         req.close()
 
+        print("Timezone:", timezone, "DST:", t.isdst)
+
+        print("WiFi Time = %d%02d%02d - %02d:%02d:%02d" % (
+            t.year, t.mon, t.mday, t.hour, t.min, t.sec
+        ))
+
+        # Compare RTC to WiFi time BEFORE overwriting RTC
+        rtc_before = rtc.datetime
         wifi_struct = time.struct_time(
             (t.year, t.mon, t.mday, t.hour, t.min, t.sec, t.wday, t.yday, t.isdst)
         )
 
-        # Compute RTC drift before overwriting RTC
-        rtc_before = rtc.datetime
+        WIFI_RESYNC_THRESHOLD_S = 120
+
         try:
-            result["drift_s"] = abs(
-                time.mktime(wifi_struct) - time.mktime(rtc_before)
-            )
+            delta_s = abs(time.mktime(wifi_struct) - time.mktime(rtc_before))
         except Exception as e:
             print("Delta calc failed:", e)
-            result["drift_s"] = None
+            delta_s = WIFI_RESYNC_THRESHOLD_S
 
-        # Update RTC with WiFi time
+        # Set RTC to WiFi time (already tz + DST adjusted by server)
         rtc.datetime = wifi_struct
-        result["rtc_time"] = rtc.datetime
-        ucStatus.text = "RTC update via WiFi"
 
-        # Force mechanical resync if drift exceeds threshold
-        WIFI_RESYNC_THRESHOLD_S = 120
-        if (
-            result["drift_s"] is not None
-            and result["drift_s"] >= WIFI_RESYNC_THRESHOLD_S
-        ):
-            print(
-                "WiFi drift %.1fs, resyncing hands/display"
-                % result["drift_s"]
-            )
+        print("Set Time  = %d%02d%02d - %02d:%02d:%02d" % (
+            t.year, t.mon, t.mday, t.hour, t.min, t.sec
+        ))
+
+        # If drift is large, refresh the physical outputs
+        if delta_s >= WIFI_RESYNC_THRESHOLD_S:
+            print("WiFi drift %.1fs, resyncing hands/display" % delta_s)
             hrUpdate(forceHour=True)
             minUpdate()
             syncOldTrackers()
-            result["resynced_mech"] = True
+        else:
+            print("WiFi drift %.1fs, no mech resync needed" % delta_s)
 
-        result["ok"] = True
-        result["msg"] = "WiFi time applied"
+        ucStatus.text = "RTC update via WiFi"; print("RTC update via WiFi")
 
-    # Handle HTTP or parsing errors
-    except Exception as e:
-        result["wifi_error"] = True
-        result["msg"] = "Time request failed"
-        print("Request Error - Time Not Updated:", e)
-        ucStatus.text = "Request Error"
+    except:
+        print("Request Error - Time Not Updated")
+        setDotstar(YELLOW, 0.25)
+        ucStatus.text = "Request Error"; print("Request Error")
         wifiCircle.fill = None
         wifiStatus.text = secrets["ssid"]
-        wifiAddress.text = str(result["ip"])
-        setDotstar(YELLOW, 0.25)
+        wifiAddress.text = str(ipAddress)
 
-    # Final RTC printout for logging
+    # Print RTC time
     t_rtc = rtc.datetime
-    result["rtc_time"] = t_rtc
-    print(
-        "RTC Time  = %d%02d%02d - %02d:%02d:%02d"
-        % (
-            t_rtc.tm_year,
-            t_rtc.tm_mon,
-            t_rtc.tm_mday,
-            t_rtc.tm_hour,
-            t_rtc.tm_min,
-            t_rtc.tm_sec,
-        )
-    )
-    ucStatus.text = " "
+    print("RTC Time  = %d%02d%02d - %02d:%02d:%02d" % (
+        t_rtc.tm_year, t_rtc.tm_mon, t_rtc.tm_mday,
+        t_rtc.tm_hour, t_rtc.tm_min, t_rtc.tm_sec
+    ))
+    ucStatus.text = " "; print(" ")
 
-    return result
+    return {"wifiError": wifiError, "rtc_time": t_rtc, "ipAddress": ipAddress}
 
 #------------------------------------------------------------------------------
 def hour24ToHour12(hour24):
