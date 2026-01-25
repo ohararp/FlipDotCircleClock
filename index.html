@@ -29,7 +29,7 @@
     .wrap { max-width: 1100px; margin: 0 auto; padding: 22px 18px 40px 18px; }
     .topbar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:16px; flex-wrap:wrap; }
     .brand { display:flex; align-items:center; gap:12px; }
-    .logo { width:42px; height:42px; border-radius:12px; background:linear-gradient(180deg,#20242c,#0e1015); border:1px solid var(--border); box-shadow:var(--shadow); }
+    .logo { width:42px; height:42px; border-radius:12px; border:1px solid var(--border); box-shadow:var(--shadow); object-fit:cover; }
     h1 { margin:0; font-size:18px; font-weight:700; color:#ffffff; }
     .subtitle { margin-top:2px; font-size:12px; color:#ffffff; opacity:0.92; }
     .pillrow { display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:flex-end; }
@@ -64,7 +64,7 @@
   <div class="wrap">
     <div class="topbar">
       <div class="brand">
-        <div class="logo"></div>
+        <img class="logo" src="data:image/png;base64,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" alt="Logo">
         <div>
           <h1>FlipDotCircleClock</h1>
           <div class="subtitle">Feather S2 Flip Dot Display</div>
