@@ -1,0 +1,17 @@
+# Secrets file with WiFi credentials and API keys
+secrets.py
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# CircuitPython lib folder (user should install their own)
+lib/
+
+# System files
+.DS_Store
+Thumbs.db
+
+# IDE settings
+.vscode/
+.idea/
