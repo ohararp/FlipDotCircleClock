@@ -27,7 +27,6 @@ import ssl
 import wifi
 import socketpool
 import adafruit_requests
-import secrets
 import json
 
 # Web Server Libraries
@@ -803,22 +802,26 @@ def getWifiTime():
     global wifiError
     global secOld, minOld, hrOld
 
-    try:
-        from secrets import secrets
-    except ImportError:
-        print("WiFi secrets are kept in secrets.py, please add them there!")
+    # Get credentials from settings.toml via os.getenv()
+    ssid = os.getenv("CIRCUITPY_WIFI_SSID")
+    password = os.getenv("CIRCUITPY_WIFI_PASSWORD")
+    timezone = os.getenv("TIMEZONE", "Etc/UTC")
+    aio_username = os.getenv("AIO_USERNAME")
+    aio_key = os.getenv("AIO_KEY")
+
+    if not ssid or not password:
+        print("WiFi credentials missing in settings.toml!")
         return {
             "wifiError": True,
             "rtc_time": rtc.datetime,
             "ipAddress": None,
-            "timezone": "Etc/UTC",
+            "timezone": timezone,
             "dst": None,
             "delta_s": None,
-            "msg": "Check Secrets.py",
+            "msg": "Check settings.toml",
         }
 
     wifiError = False
-    timezone = secrets.get("timezone", "Etc/UTC")
 
     result = {
         "wifiError": False,
@@ -837,9 +840,9 @@ def getWifiTime():
     wifiAddress.text = "---"
     result["msg"] = "Connecting to WiFi"
 
-    print("Connecting to %s" % secrets["ssid"])
+    print("Connecting to %s" % ssid)
     try:
-        wifi.radio.connect(secrets["ssid"], secrets["password"])
+        wifi.radio.connect(ssid, password)
     except Exception as e:
         wifiError = True
         result["wifiError"] = True
@@ -854,13 +857,10 @@ def getWifiTime():
 
     ucStatus.text = "WiFi Available"; print("WiFi Available")
     wifiCircle.fill = 0xFFFFFF
-    wifiStatus.text = secrets["ssid"]
+    wifiStatus.text = ssid
     wifiAddress.text = str(ipAddress)
     setDotstar(GREEN, 0.25)
     result["msg"] = "WiFi Available"
-
-    aio_username = secrets["aio_username"]
-    aio_key = secrets["aio_key"]
 
     try:
         pool = socketpool.SocketPool(wifi.radio)
@@ -1115,13 +1115,8 @@ def setupWebServer(pool):
             time_str = "??:??:??"
             hr12 = 0
 
-        try:
-            from secrets import secrets
-            ssid = secrets.get("ssid", "Unknown")
-            tz = secrets.get("timezone", "Unknown")
-        except:
-            ssid = "Unknown"
-            tz = "Unknown"
+        ssid = os.getenv("CIRCUITPY_WIFI_SSID", "Unknown")
+        tz = os.getenv("TIMEZONE", "Unknown")
 
         status = {
             "time": time_str,

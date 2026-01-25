@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir /s /b)",
+      "Bash(dir /b)",
+      "Bash(git init:*)",
+      "Bash(git remote add:*)",
+      "Bash(git add:*)",
+      "Bash(git config:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nInitial commit: FlipDotCircleClock with web interface\n\n- CircuitPython flip dot clock for Feather S2\n- Web dashboard for status monitoring and control\n- API endpoints for remote interaction\n- Stepper motor control for minute hand\n- DS3231 RTC with WiFi time sync via Adafruit IO\n- OLED status display\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git branch:*)",
+      "Bash(git push:*)",
+      "Bash(git pull:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nAdd comprehensive README documentation\n\n- Project overview and features\n- Hardware pin mapping and components\n- Setup and configuration instructions\n- Web interface and API documentation\n- Physical button functions\n- Troubleshooting guide\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
+    ]
+  }
+}

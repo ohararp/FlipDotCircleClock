@@ -71,23 +71,25 @@ Copy these libraries to the `lib/` folder on your CIRCUITPY drive:
 
 ### 2. Configure Credentials
 
-Copy `secrets.py.example` to `secrets.py` and fill in your details:
+Copy `settings.toml.example` to `settings.toml` and fill in your details:
 
-```python
-secrets = {
-    "ssid": "YOUR_WIFI_SSID",
-    "password": "YOUR_WIFI_PASSWORD",
-    "timezone": "America/New_York",
-    "aio_username": "YOUR_AIO_USERNAME",
-    "aio_key": "YOUR_AIO_KEY",
-}
+```toml
+CIRCUITPY_WIFI_SSID = "YOUR_WIFI_SSID"
+CIRCUITPY_WIFI_PASSWORD = "YOUR_WIFI_PASSWORD"
+CIRCUITPY_WEB_API_PASSWORD = "your_password"
+CIRCUITPY_WEB_API_PORT = 80
+
+TIMEZONE = "America/New_York"
+
+AIO_USERNAME = "YOUR_AIO_USERNAME"
+AIO_KEY = "YOUR_AIO_KEY"
 ```
 
 Get free Adafruit IO credentials at: https://io.adafruit.com
 
 ### 3. Deploy
 
-Copy `code.py` and `secrets.py` to your CIRCUITPY drive.
+Copy `code.py` and `settings.toml` to your CIRCUITPY drive.
 
 ## Web Interface
 

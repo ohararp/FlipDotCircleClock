@@ -1,0 +1,19 @@
+# CircuitPython settings file
+# Copy this to settings.toml and fill in your credentials
+
+# WiFi credentials (auto-connected by CircuitPython)
+CIRCUITPY_WIFI_SSID = "YOUR_WIFI_SSID"
+CIRCUITPY_WIFI_PASSWORD = "YOUR_WIFI_PASSWORD"
+
+# Web workflow settings (optional)
+CIRCUITPY_WEB_API_PASSWORD = "your_password"
+CIRCUITPY_WEB_API_PORT = 80
+
+# Timezone (see http://worldtimeapi.org/timezones for full list)
+# Examples: America/New_York, America/Chicago, America/Los_Angeles
+#           Europe/London, Europe/Paris, Asia/Tokyo, Australia/Sydney
+TIMEZONE = "America/New_York"
+
+# Adafruit IO credentials (get free account at https://io.adafruit.com)
+AIO_USERNAME = "YOUR_AIO_USERNAME"
+AIO_KEY = "YOUR_AIO_KEY"

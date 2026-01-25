@@ -1,4 +1,5 @@
-# Secrets file with WiFi credentials and API keys
+# Settings file with WiFi credentials and API keys
+settings.toml
 secrets.py
 
 # Python cache
