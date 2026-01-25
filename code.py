@@ -78,6 +78,9 @@ motorDisabled = True
 relayPrechargeS = 0.20   # seconds to let 24V rails charge
 relayHoldS      = 0.08   # seconds to keep rails up after last flip
 
+# Flipdot timing (seconds between actuations, allows capacitor recharge)
+flipdotDelay = 0.5
+
 flipPwrIsOn = False
 flipPwrOffAtS = 0.0
 
@@ -749,10 +752,10 @@ def hrUpdate(forceHour=False):
         flipsPower(True)
         try:
             setFlips([0, 0, 0, 0], 1, managePower=False)   # force black
-            time.sleep(0.05)
+            time.sleep(flipdotDelay)
 
             setFlips(hourIn(hr12), 1, managePower=False)  # force hour
-            time.sleep(0.05)
+            time.sleep(flipdotDelay)
 
             setFlips(hourIn(hr12), 1, managePower=False)  # small retry
         finally:

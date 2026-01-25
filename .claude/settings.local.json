@@ -11,7 +11,17 @@
       "Bash(git branch:*)",
       "Bash(git push:*)",
       "Bash(git pull:*)",
-      "Bash(git commit -m \"$\\(cat <<''EOF''\nAdd comprehensive README documentation\n\n- Project overview and features\n- Hardware pin mapping and components\n- Setup and configuration instructions\n- Web interface and API documentation\n- Physical button functions\n- Troubleshooting guide\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nAdd comprehensive README documentation\n\n- Project overview and features\n- Hardware pin mapping and components\n- Setup and configuration instructions\n- Web interface and API documentation\n- Physical button functions\n- Troubleshooting guide\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nUpdate to CircuitPython 10 settings.toml format\n\n- Replace secrets.py with settings.toml for credentials\n- Use os.getenv\\(\\) for WiFi, timezone, and Adafruit IO settings\n- Update README with new configuration instructions\n- Add settings.toml.example template\n- Update .gitignore to exclude settings.toml\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(mode)",
+      "Bash(stty:*)",
+      "Bash(timeout 10 cat:*)",
+      "Bash(powershell.exe -Command \"[System.IO.Ports.SerialPort]::GetPortNames\\(\\)\")",
+      "Bash(python:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nFix CircuitPython 10 compatibility issues\n\n- Import i2cdisplaybus for I2CDisplayBus \\(moved from displayio\\)\n- Replace display.show\\(\\) with display.root_group \\(deprecated API\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "WebFetch(domain:192.168.87.30)",
+      "Bash(curl:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nImprove motor homing algorithm with symmetric edge detection\n\n- Detect both magnet edges at release points for consistency\n- Eliminates hall sensor hysteresis variations\n- Calculate true center from both edge positions\n- Home Motor web button now pauses at 12:00 for visual verification\n\nThis deterministic approach helped identify a hardware geometry offset\nin the minute hand assembly.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
     ]
   }
 }
