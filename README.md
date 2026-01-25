@@ -5,30 +5,32 @@ A CircuitPython-based flip dot clock with a mechanical minute hand, running on a
 ## Features
 
 - **Flip Dot Hour Display**: 4-column flip dot display shows the current hour (1-12)
-- **Mechanical Minute Hand**: Stepper motor-driven minute hand with hall sensor homing
+- **Mechanical Minute Hand**: Stepper motor-driven minute hand with precision hall sensor homing
 - **WiFi Time Sync**: Automatic time synchronization via Adafruit IO with timezone support
 - **OLED Status Display**: 128x64 SH1107 display showing time, WiFi status, and IP address
 - **Web Interface**: Browser-based dashboard for remote monitoring and control
 - **Physical Buttons**: 3 buttons for manual time adjustment and display control
 - **Battery-Backed RTC**: DS3231 real-time clock maintains time during power loss
 
-## Hardware
+## Requirements
 
-### Microcontroller
-- Adafruit Feather S2 (ESP32-S2)
+- **CircuitPython 10.x** (tested on 10.0.3)
+- Feather S2 (ESP32-S2)
+
+## Hardware
 
 ### Components
 | Component | Connection | Description |
 |-----------|------------|-------------|
 | Flip Dot Display | SPI (IO35, IO36, IO37, IO18) | 4-column flip dot matrix |
-| Stepper Motor | IO5, IO6, IO12, IO14, IO17 | Minute hand drive |
+| Stepper Motor | IO5, IO6, IO12, IO14, IO17 | Direct-drive minute hand |
 | DS3231 RTC | I2C | Battery-backed timekeeping |
 | SH1107 OLED | I2C (0x3C) | 128x64 status display |
 | Relay | IO11 | 24V flipdot power control |
 | Button A | IO1 | Display animation/reset |
 | Button B | IO38 | +1 Hour |
 | Button C | IO33 | +1 Minute |
-| Hall Sensor | IO14 | Motor home position |
+| Hall Sensor | IO14 | Motor home position detection |
 | DotStar LED | APA102 | Status indicator |
 
 ### Pin Summary
@@ -57,10 +59,15 @@ Buttons:
 
 ## Setup
 
-### 1. Install CircuitPython Libraries
+### 1. Install CircuitPython 10.x
+
+Download from: https://circuitpython.org/board/unexpectedmaker_feathers2/
+
+### 2. Install Libraries
 
 Copy these libraries to the `lib/` folder on your CIRCUITPY drive:
 - `adafruit_ds3231`
+- `adafruit_register`
 - `adafruit_displayio_sh1107`
 - `adafruit_display_text`
 - `adafruit_display_shapes`
@@ -69,7 +76,7 @@ Copy these libraries to the `lib/` folder on your CIRCUITPY drive:
 - `adafruit_requests`
 - `adafruit_httpserver`
 
-### 2. Configure Credentials
+### 3. Configure Credentials
 
 Copy `settings.toml.example` to `settings.toml` and fill in your details:
 
@@ -87,15 +94,27 @@ AIO_KEY = "YOUR_AIO_KEY"
 
 Get free Adafruit IO credentials at: https://io.adafruit.com
 
-### 3. Deploy
+### 4. Deploy
 
 Copy `code.py` and `settings.toml` to your CIRCUITPY drive.
 
+## Configuration
+
+### Timing Constants (in code.py)
+
+These values can be adjusted at the top of `code.py`:
+
+```python
+relayPrechargeS = 0.20   # seconds to let 24V rails charge
+relayHoldS      = 0.08   # seconds to keep rails up after last flip
+flipdotDelay    = 0.5    # seconds between flipdot actuations (capacitor recharge)
+```
+
 ## Web Interface
 
-Once connected to WiFi, the clock starts a web server. Access it at:
+Once connected to WiFi, the clock starts a web server on port 5000:
 ```
-http://<ip-address>/
+http://<ip-address>:5000/
 ```
 
 The IP address is shown on the OLED display and printed to the serial console.
@@ -119,7 +138,7 @@ The IP address is shown on the OLED display and printed to the serial console.
 | `/set_hour` | POST | Increment hour by 1 |
 | `/set_min` | POST | Increment minute by 1 |
 | `/refresh` | POST | Force flipdot hour refresh |
-| `/home` | POST | Re-home the minute hand motor |
+| `/home` | POST | Re-home motor (pauses at 12:00 for verification) |
 | `/sync_wifi` | POST | Trigger WiFi time sync |
 
 ### Status JSON Response
@@ -151,6 +170,21 @@ The IP address is shown on the OLED display and printed to the serial console.
 | **B** | Increment RTC hour (+1), refresh flipdot display |
 | **C** | Increment RTC minute (+1), update minute hand |
 
+## Motor Homing Algorithm
+
+The minute hand uses a hall sensor and magnet for precise homing. The algorithm uses symmetric edge detection for accuracy:
+
+1. Step forward until hall sensor triggers (entering magnet zone)
+2. Reverse until hall sensor releases (precise edge A)
+3. Continue reversing until hall triggers again (other side)
+4. Step forward until hall releases (precise edge B)
+5. Move to midpoint between edge A and edge B
+6. Set this position as 12:00 (stepNow = 0)
+
+Both edges are detected at the **release point** for consistency, eliminating hall sensor hysteresis variations.
+
+The "Home Motor" web button pauses at 12:00 for visual verification before the next minute update moves the hand.
+
 ## Operation
 
 ### Startup Sequence
@@ -160,7 +194,7 @@ The IP address is shown on the OLED display and printed to the serial console.
 4. Display current hour on flipdots
 5. Position minute hand
 6. Connect to WiFi and sync time
-7. Start web server
+7. Start web server on port 5000
 8. Enter main loop
 
 ### Main Loop
@@ -171,7 +205,7 @@ The IP address is shown on the OLED display and printed to the serial console.
 
 ## Timezone Configuration
 
-Supported timezones (set in `secrets.py`):
+Supported timezones (set in `settings.toml`):
 
 **United States**
 - `America/New_York`
@@ -199,22 +233,25 @@ Full list: http://worldtimeapi.org/timezones
 ## Troubleshooting
 
 ### WiFi Connection Issues
-- Check SSID and password in `secrets.py`
+- Check SSID and password in `settings.toml`
 - Ensure 2.4GHz network (ESP32-S2 doesn't support 5GHz)
 - Check serial console for error messages
 
-### Motor Not Homing
+### Motor Not Homing Correctly
 - Verify hall sensor connection (IO14)
 - Check magnet position on minute hand
+- Use "Home Motor" web button to verify 12:00 position
 - Motor should detect magnet within one full rotation
 
 ### Flipdots Not Flipping
 - Check 24V power supply
 - Verify relay clicks when flipdot power enabled
+- Increase `flipdotDelay` if capacitors need more recharge time
 - Check SPI connections
 
 ### Web Interface Not Loading
 - Confirm WiFi connected (check OLED display)
+- Note: web server runs on **port 5000**, not 80
 - Try accessing `/status.json` directly
 - Check serial console for server errors
 
