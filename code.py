@@ -600,39 +600,58 @@ def moveHome(delay):
 
 #%%----------------------------------------------------------------------------
 def findExactHome(delay):
-    # Find magnet edges, move to center, and zero stepNow.
+    # Find magnet center using symmetric edge detection.
+    # Both edges detected at release point for consistency.
     print('Finding Exact Home')
     en.value = motorEnabled
 
-    ctr0 = 0
-    ctr1 = 0
+    global stepNow
+    stepNow = 0  # Reset counter for relative measurements
 
-    print('Finding Beg of Magnet')
-    while 1:
+    # Step 1: Move forward until hall triggers (enter magnet zone)
+    print('Step 1: Finding magnet zone')
+    while not hallStable(False):
         oneStep(1, delay)
-        ctr0 += 1
-        if hallStable(False):
-            break
 
-    print('Ctr0 = %d' % ctr0)
-    print('Finding End of Magnet')
+    # Step 2: Reverse until hall releases (precise edge A)
+    print('Step 2: Finding edge A (release point)')
+    while not hallStable(True):
+        oneStep(0, delay)
+    edge_a = stepNow
+    print('Edge A at step: %d' % edge_a)
 
-    while 1:
-        oneStep(1, delay)
-        ctr1 += 1
-        if hallStable(True):
-            break
-
-    half_width = ctr1 // 2
-    for _ in range(half_width):
+    # Step 3: Continue reversing until hall triggers (other side of magnet)
+    print('Step 3: Passing through to other side')
+    while not hallStable(False):
         oneStep(0, delay)
 
-    print('Ctr1 = %d' % ctr1)
+    # Step 4: Reverse again (forward) until hall releases (precise edge B)
+    print('Step 4: Finding edge B (release point)')
+    while not hallStable(True):
+        oneStep(1, delay)
+    edge_b = stepNow
+    print('Edge B at step: %d' % edge_b)
 
-    global stepNow
+    # Step 5: Calculate center and move there
+    magnet_width = abs(edge_a - edge_b)
+    center = (edge_a + edge_b) // 2
+    steps_to_center = center - stepNow
+
+    print('Magnet width: %d steps' % magnet_width)
+    print('Center at: %d, moving %d steps' % (center, steps_to_center))
+
+    if steps_to_center > 0:
+        for _ in range(steps_to_center):
+            oneStep(1, delay)
+    elif steps_to_center < 0:
+        for _ in range(abs(steps_to_center)):
+            oneStep(0, delay)
+
+    # Step 6: Set home position
     stepNow = 0
-    #en.value = motorDisabled
-    return ctr1
+    print('Home set at center of magnet')
+
+    return magnet_width
 
 #%%----------------------------------------------------------------------------
 def hourHome():
@@ -1169,10 +1188,10 @@ def setupWebServer(pool):
 
     @server.route("/home", POST)
     def home_route(request: Request):
-        log_action("Home motor via web")
+        log_action("Home motor via web - pausing at 12:00")
         findExactHome(0.002125)
-        minUpdate()
-        return Response(request, body='{"ok":true}', content_type="application/json")
+        # Don't call minUpdate() - leave hand at 12:00 for visual verification
+        return Response(request, body='{"ok":true,"msg":"Homed to 12:00 - hand will stay here until next minute update"}', content_type="application/json")
 
     @server.route("/sync_wifi", POST)
     def sync_wifi_route(request: Request):
