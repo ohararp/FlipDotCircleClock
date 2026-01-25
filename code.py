@@ -18,12 +18,10 @@ from adafruit_display_text import label
 import adafruit_displayio_sh1107
 from adafruit_display_shapes.rect import Rect
 from adafruit_display_shapes.roundrect import RoundRect
-from adafruit_display_shapes.line import Line
 from adafruit_display_shapes.circle import Circle
 import i2cdisplaybus
 
 # WIFI Libraries
-import ipaddress
 import ssl
 import wifi
 import socketpool
@@ -35,7 +33,6 @@ from adafruit_httpserver import Server, Request, Response, POST
 
 # LED Libraries
 import adafruit_dotstar
-import adafruit_fancyled.adafruit_fancyled as fancy
 
 
 # Panel Header
