@@ -20,6 +20,7 @@ from adafruit_display_shapes.rect import Rect
 from adafruit_display_shapes.roundrect import RoundRect
 from adafruit_display_shapes.line import Line
 from adafruit_display_shapes.circle import Circle
+import i2cdisplaybus
 
 # WIFI Libraries
 import ipaddress
@@ -645,7 +646,7 @@ def setupScreen(i2c):
     blk = 0x000000
     wht = 0xFFFFFF
     displayio.release_displays()
-    display_bus = displayio.I2CDisplay(i2c, device_address=0x3C)
+    display_bus = i2cdisplaybus.I2CDisplayBus(i2c, device_address=0x3C)
 
     screenWidth  = 128
     screenHeight = 64
@@ -657,7 +658,7 @@ def setupScreen(i2c):
     )
 
     screen = displayio.Group()
-    display.show(screen)
+    display.root_group = screen
 
     rect = RoundRect(
         int(screenBorder/2), int(screenBorder/2),
