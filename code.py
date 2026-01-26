@@ -26,7 +26,9 @@ import ssl
 import wifi
 import socketpool
 import adafruit_requests
+import adafruit_ntp
 import json
+import storage
 
 # Web Server Libraries
 from adafruit_httpserver import Server, Request, Response, POST
@@ -96,6 +98,32 @@ last_wifi_sync_time = "Never"
 # HTML Dashboard - loaded from index.html file
 INDEX_HTML_FILE = "/index.html"
 
+# Config file for runtime settings (timezone)
+CONFIG_FILE = "/config.json"
+
+# Timezone table: (key, display_name, utc_offset_minutes, dst_rule)
+# dst_rule: None=no DST, "US"=US rules, "EU"=EU rules, "AU"=AU rules, "NZ"=NZ rules
+TIMEZONES = (
+    ("US/Hawaii",    "Hawaii",             -600, None),
+    ("US/Alaska",    "Alaska",             -540, "US"),
+    ("US/Pacific",   "Pacific (LA)",       -480, "US"),
+    ("US/Mountain",  "Mountain (Denver)",  -420, "US"),
+    ("US/Arizona",   "Arizona",            -420, None),
+    ("US/Central",   "Central (Chicago)",  -360, "US"),
+    ("US/Eastern",   "Eastern (New York)", -300, "US"),
+    ("EU/London",    "London",                0, "EU"),
+    ("EU/Paris",     "Paris",               +60, "EU"),
+    ("EU/Berlin",    "Berlin",              +60, "EU"),
+    ("EU/Moscow",    "Moscow",             +180, None),
+    ("AS/Dubai",     "Dubai",              +240, None),
+    ("AS/Mumbai",    "Mumbai",             +330, None),
+    ("AS/Singapore", "Singapore",          +480, None),
+    ("AS/Tokyo",     "Tokyo",              +540, None),
+    ("OC/Sydney",    "Sydney",             +600, "AU"),
+    ("OC/Auckland",  "Auckland",           +720, "NZ"),
+    ("UTC",          "UTC",                   0, None),
+)
+
 
 #%%----------------------------------------------------------------------------
 def getBit(value, bitIdx):
@@ -154,6 +182,166 @@ def get_uptime():
     # Return uptime in seconds since start.
     global start_time
     return int(time.monotonic() - start_time)
+
+#%%----------------------------------------------------------------------------
+def load_config():
+    # Load config from JSON file, return dict with defaults if missing.
+    default_config = {"timezone": "US/Eastern"}
+    try:
+        with open(CONFIG_FILE, "r") as f:
+            config = json.loads(f.read())
+            for key in default_config:
+                if key not in config:
+                    config[key] = default_config[key]
+            return config
+    except (OSError, ValueError) as e:
+        print("Config load error, using defaults:", e)
+        return default_config
+
+#%%----------------------------------------------------------------------------
+def is_usb_connected():
+    # Check if USB is mounted (filesystem is read-only).
+    try:
+        return storage.getmount("/").readonly
+    except Exception:
+        return False
+
+#%%----------------------------------------------------------------------------
+def save_config(config):
+    # Save config dict to JSON file.
+    if is_usb_connected():
+        print("Config save blocked: USB is connected (filesystem read-only)")
+        return False
+    try:
+        with open(CONFIG_FILE, "w") as f:
+            f.write(json.dumps(config))
+        return True
+    except Exception as e:
+        print("Config save error:", e)
+        return False
+
+#%%----------------------------------------------------------------------------
+# DST Calculation Functions
+#%%----------------------------------------------------------------------------
+def nth_weekday(year, month, weekday, n):
+    # Find nth occurrence of weekday in month.
+    # weekday: 0=Monday, 6=Sunday. n: 1=first, 2=second, -1=last.
+    if n == -1:
+        # Last occurrence - find last day of month
+        if month == 12:
+            next_month_start = time.mktime((year + 1, 1, 1, 0, 0, 0, 0, 0, -1))
+        else:
+            next_month_start = time.mktime((year, month + 1, 1, 0, 0, 0, 0, 0, -1))
+        last_day_epoch = next_month_start - 86400
+        last_day = time.localtime(last_day_epoch)
+        day = last_day.tm_mday
+        wday = last_day.tm_wday
+        diff = (wday - weekday) % 7
+        return day - diff
+    else:
+        # Find first day of month's weekday
+        first_epoch = time.mktime((year, month, 1, 0, 0, 0, 0, 0, -1))
+        first = time.localtime(first_epoch)
+        first_wday = first.tm_wday
+        diff = (weekday - first_wday) % 7
+        first_occurrence = 1 + diff
+        return first_occurrence + (n - 1) * 7
+
+#%%----------------------------------------------------------------------------
+def is_dst_us(year, month, day, hour):
+    # US DST: 2nd Sunday March 2am -> 1st Sunday November 2am
+    if month < 3 or month > 11:
+        return False
+    if month > 3 and month < 11:
+        return True
+    dst_start_day = nth_weekday(year, 3, 6, 2)   # 2nd Sunday March
+    dst_end_day = nth_weekday(year, 11, 6, 1)    # 1st Sunday November
+    if month == 3:
+        return day > dst_start_day or (day == dst_start_day and hour >= 2)
+    if month == 11:
+        return day < dst_end_day or (day == dst_end_day and hour < 2)
+    return False
+
+#%%----------------------------------------------------------------------------
+def is_dst_eu(year, month, day, hour):
+    # EU DST: Last Sunday March 1am UTC -> Last Sunday October 1am UTC
+    if month < 3 or month > 10:
+        return False
+    if month > 3 and month < 10:
+        return True
+    dst_start_day = nth_weekday(year, 3, 6, -1)  # Last Sunday March
+    dst_end_day = nth_weekday(year, 10, 6, -1)   # Last Sunday October
+    if month == 3:
+        return day > dst_start_day or (day == dst_start_day and hour >= 1)
+    if month == 10:
+        return day < dst_end_day or (day == dst_end_day and hour < 1)
+    return False
+
+#%%----------------------------------------------------------------------------
+def is_dst_au(year, month, day, hour):
+    # AU DST: 1st Sunday October 2am -> 1st Sunday April 3am (Southern Hemisphere)
+    dst_start_day = nth_weekday(year, 10, 6, 1)  # 1st Sunday October
+    dst_end_day = nth_weekday(year, 4, 6, 1)     # 1st Sunday April
+    # Southern hemisphere: DST is Oct-Apr
+    if month > 10 or month < 4:
+        return True
+    if month > 4 and month < 10:
+        return False
+    if month == 10:
+        return day > dst_start_day or (day == dst_start_day and hour >= 2)
+    if month == 4:
+        return day < dst_end_day or (day == dst_end_day and hour < 3)
+    return False
+
+#%%----------------------------------------------------------------------------
+def is_dst_nz(year, month, day, hour):
+    # NZ DST: Last Sunday September 2am -> 1st Sunday April 3am
+    dst_start_day = nth_weekday(year, 9, 6, -1)  # Last Sunday September
+    dst_end_day = nth_weekday(year, 4, 6, 1)     # 1st Sunday April
+    if month > 9 or month < 4:
+        return True
+    if month > 4 and month < 9:
+        return False
+    if month == 9:
+        return day > dst_start_day or (day == dst_start_day and hour >= 2)
+    if month == 4:
+        return day < dst_end_day or (day == dst_end_day and hour < 3)
+    return False
+
+#%%----------------------------------------------------------------------------
+def get_timezone_offset(tz_key):
+    # Return base UTC offset in minutes for timezone key.
+    for tz in TIMEZONES:
+        if tz[0] == tz_key:
+            return tz[2]
+    return 0  # Default to UTC
+
+#%%----------------------------------------------------------------------------
+def calculate_dst_offset(tz_key, utc_time):
+    # Return DST offset in minutes (60 if active, 0 otherwise).
+    tz_entry = None
+    for tz in TIMEZONES:
+        if tz[0] == tz_key:
+            tz_entry = tz
+            break
+    if not tz_entry or tz_entry[3] is None:
+        return 0
+
+    dst_rule = tz_entry[3]
+    year = utc_time.tm_year
+    month = utc_time.tm_mon
+    day = utc_time.tm_mday
+    hour = utc_time.tm_hour
+
+    if dst_rule == "US":
+        return 60 if is_dst_us(year, month, day, hour) else 0
+    elif dst_rule == "EU":
+        return 60 if is_dst_eu(year, month, day, hour) else 0
+    elif dst_rule == "AU":
+        return 60 if is_dst_au(year, month, day, hour) else 0
+    elif dst_rule == "NZ":
+        return 60 if is_dst_nz(year, month, day, hour) else 0
+    return 0
 
 
 #%%----------------------------------------------------------------------------
@@ -622,45 +810,19 @@ def setDotstar(color, brightness):
     dotstar[0] = (color[0], color[1], color[2], brightness)
 
 #%%----------------------------------------------------------------------------
-class timeOut:
-    # Parse time JSON response into fields or mark all fields as 99.
-    def __init__(self, reqMsg):
-        # Parse time JSON or mark error fields as 99s.
-        reqMsg.find("error")
-        if (reqMsg.find("error") != -1):
-            self.year = 99
-            self.mon  = 99
-            self.mday = 99
-            self.hour = 99
-            self.min  = 99
-            self.sec  = 99
-            self.wday = 99
-            self.yday = 99
-            self.isdst = 99
-        else:
-            req = json.loads(reqMsg)
-            self.year = req['year']
-            self.mon  = req['mon']
-            self.mday = req['mday']
-            self.hour = req['hour']
-            self.min  = req['min']
-            self.sec  = req['sec']
-            self.wday = req['wday']
-            self.yday = req['yday']
-            self.isdst = req['isdst']
-
-#%%----------------------------------------------------------------------------
 def getWifiTime():
-    # Connect WiFi, fetch time (tz-aware), set RTC, and optionally resync outputs.
+    # Connect WiFi, fetch UTC time via NTP, apply timezone/DST, set RTC.
     global wifiError
     global secOld, minOld, hrOld
 
-    # Get credentials from settings.toml via os.getenv()
+    # Get WiFi credentials from settings.toml
     ssid = os.getenv("CIRCUITPY_WIFI_SSID")
     password = os.getenv("CIRCUITPY_WIFI_PASSWORD")
-    timezone = os.getenv("TIMEZONE", "Etc/UTC")
-    aio_username = os.getenv("AIO_USERNAME")
-    aio_key = os.getenv("AIO_KEY")
+    ntp_server = os.getenv("NTP_SERVER", "pool.ntp.org")
+
+    # Load timezone from config.json (writable) or fallback to settings.toml
+    config = load_config()
+    timezone = config.get("timezone", os.getenv("TIMEZONE", "US/Eastern"))
 
     if not ssid or not password:
         print("WiFi credentials missing in settings.toml!")
@@ -681,14 +843,14 @@ def getWifiTime():
         "rtc_time": rtc.datetime,
         "ipAddress": None,
         "timezone": timezone,
-        "dst": None,
+        "dst": False,
         "delta_s": None,
         "msg": "Init",
     }
 
     setDotstar(PURPLE, 0.25)
     wifiCircle.fill = None
-    ucStatus.text = "Connecting to WiFi"; print("Connecting to WiFi")
+    ucStatus.text = "Connecting WiFi"; print("Connecting to WiFi")
     wifiStatus.text = "---"
     wifiAddress.text = "---"
     result["msg"] = "Connecting to WiFi"
@@ -708,7 +870,7 @@ def getWifiTime():
     ipAddress = wifi.radio.ipv4_address
     result["ipAddress"] = ipAddress
 
-    ucStatus.text = "WiFi Available"; print("WiFi Available")
+    ucStatus.text = "WiFi Connected"; print("WiFi Available")
     wifiCircle.fill = 0xFFFFFF
     wifiStatus.text = ssid
     wifiAddress.text = str(ipAddress)
@@ -717,55 +879,73 @@ def getWifiTime():
 
     try:
         pool = socketpool.SocketPool(wifi.radio)
-        requests = adafruit_requests.Session(pool, ssl.create_default_context())
 
-        # Adafruit IO time integration supports tz; server applies DST for that tz.
-        TIME_URL = (
-            "https://io.adafruit.com/api/v2/%s/integrations/time/struct"
-            "?x-aio-key=%s&tz=%s" % (aio_username, aio_key, timezone)
-        )
-        print("Fetching time from", TIME_URL)
+        ucStatus.text = "NTP Sync"; print("Fetching NTP from", ntp_server)
+        result["msg"] = "NTP Sync"
 
-        ucStatus.text = "Sending Request"; print("Sending Request")
-        result["msg"] = "Sending Request"
+        # Create NTP client and get UTC time
+        ntp = adafruit_ntp.NTP(pool, server=ntp_server, tz_offset=0)
+        utc_time = ntp.datetime
 
-        req = requests.get(TIME_URL)
-        t = timeOut(req.text)
-        req.close()
+        # Look up timezone offset and DST
+        tz_offset_min = get_timezone_offset(timezone)
+        dst_offset_min = calculate_dst_offset(timezone, utc_time)
+        total_offset_min = tz_offset_min + dst_offset_min
 
-        result["dst"] = t.isdst
+        result["dst"] = dst_offset_min > 0
+
+        # Apply offset to get local time
+        utc_epoch = time.mktime(utc_time)
+        local_epoch = utc_epoch + (total_offset_min * 60)
+        local_time = time.localtime(local_epoch)
+
+        # Build struct_time for RTC
+        local_struct = time.struct_time((
+            local_time.tm_year,
+            local_time.tm_mon,
+            local_time.tm_mday,
+            local_time.tm_hour,
+            local_time.tm_min,
+            local_time.tm_sec,
+            local_time.tm_wday,
+            local_time.tm_yday,
+            1 if result["dst"] else 0
+        ))
 
         rtc_before = rtc.datetime
-        wifi_struct = time.struct_time(
-            (t.year, t.mon, t.mday, t.hour, t.min, t.sec, t.wday, t.yday, t.isdst)
-        )
 
         WIFI_RESYNC_THRESHOLD_S = 120
         try:
-            delta_s = abs(time.mktime(wifi_struct) - time.mktime(rtc_before))
+            delta_s = abs(time.mktime(local_struct) - time.mktime(rtc_before))
         except Exception as e:
             print("Delta calc failed:", e)
             delta_s = WIFI_RESYNC_THRESHOLD_S
 
         result["delta_s"] = delta_s
 
-        rtc.datetime = wifi_struct
+        rtc.datetime = local_struct
         result["rtc_time"] = rtc.datetime
 
         if delta_s >= WIFI_RESYNC_THRESHOLD_S:
-            print("WiFi drift %.1fs, resyncing hands/display" % delta_s)
+            print("Time drift %.1fs, resyncing" % delta_s)
             hrUpdate(forceHour=True)
             minUpdate()
             syncOldTrackers()
 
-        ucStatus.text = "RTC update via WiFi"; print("RTC update via WiFi")
-        result["msg"] = "RTC update via WiFi"
+        tz_name = timezone
+        for tz in TIMEZONES:
+            if tz[0] == timezone:
+                tz_name = tz[1]
+                break
+        print("RTC updated via NTP (%s, DST=%s)" % (tz_name, result["dst"]))
+        ucStatus.text = "NTP Synced"
+        result["msg"] = "RTC update via NTP"
 
     except Exception as e:
-        print("Request Error - Time Not Updated:", e)
+        print("NTP Error:", e)
         setDotstar(YELLOW, 0.25)
-        ucStatus.text = "Request Error"; print("Request Error")
-        result["msg"] = "Request Error"
+        ucStatus.text = "NTP Error"; print("NTP Error")
+        result["msg"] = "NTP Error"
         result["wifiError"] = True
         result["rtc_time"] = rtc.datetime
 
@@ -971,7 +1151,15 @@ def setupWebServer(pool):
             hr12 = 0
 
         ssid = os.getenv("CIRCUITPY_WIFI_SSID", "Unknown")
-        tz = os.getenv("TIMEZONE", "Unknown")
+
+        # Load timezone from config.json
+        config = load_config()
+        tz = config.get("timezone", "US/Eastern")
+        tz_name = tz
+        for timezone in TIMEZONES:
+            if timezone[0] == tz:
+                tz_name = timezone[1]
+                break
 
         status = {
             "time": time_str,
@@ -981,6 +1169,7 @@ def setupWebServer(pool):
             "ip_address": str(wifi.radio.ipv4_address) if wifi.radio.connected else "None",
             "ssid": ssid,
             "timezone": tz,
+            "timezone_name": tz_name,
             "motor_position": stepNow,
             "motor_steps_total": STEPS,
             "last_hour_shown": lastHourShown if lastHourShown else 0,
@@ -1037,6 +1226,95 @@ def setupWebServer(pool):
             t = rtc.datetime
             last_wifi_sync_time = "{:02}:{:02}:{:02}".format(t.tm_hour, t.tm_min, t.tm_sec)
         return Response(request, body=json.dumps({"ok": not result["wifiError"]}), content_type="application/json")
+
+    @server.route("/get_timezone")
+    def get_timezone_route(request: Request):
+        # Return current timezone and list of all available timezones.
+        config = load_config()
+        current_tz = config.get("timezone", "US/Eastern")
+
+        tz_list = []
+        for tz in TIMEZONES:
+            tz_list.append({
+                "key": tz[0],
+                "name": tz[1],
+                "offset": tz[2],
+                "dst": tz[3] is not None
+            })
+
+        response = {
+            "current": current_tz,
+            "timezones": tz_list
+        }
+        return Response(request, body=json.dumps(response), content_type="application/json")
+
+    @server.route("/set_timezone", POST)
+    def set_timezone_route(request: Request):
+        # Set timezone, save to config, and immediately resync clock.
+        global last_wifi_sync_time
+
+        # Check if USB is connected (filesystem read-only)
+        if is_usb_connected():
+            log_action("Timezone change blocked: Disconnect USB first")
+            return Response(
+                request,
+                body='{"ok":false,"error":"USB connected - disconnect USB to save settings"}',
+                content_type="application/json"
+            )
+
+        try:
+            # Parse JSON body
+            body = request.body.decode("utf-8") if request.body else "{}"
+            data = json.loads(body)
+            new_tz = data.get("timezone", "").strip()
+
+            # Validate timezone exists
+            valid = False
+            tz_name = new_tz
+            for tz in TIMEZONES:
+                if tz[0] == new_tz:
+                    valid = True
+                    tz_name = tz[1]
+                    break
+
+            if not valid:
+                return Response(
+                    request,
+                    body='{"ok":false,"error":"Invalid timezone"}',
+                    content_type="application/json"
+                )
+
+            # Save to config
+            config = load_config()
+            config["timezone"] = new_tz
+            if not save_config(config):
+                return Response(
+                    request,
+                    body='{"ok":false,"error":"Failed to save config"}',
+                    content_type="application/json"
+                )
+
+            log_action("Timezone set to " + tz_name)
+
+            # Immediately resync with new timezone
+            result = getWifiTime()
+            if not result["wifiError"]:
+                t = rtc.datetime
+                last_wifi_sync_time = "{:02}:{:02}:{:02}".format(t.tm_hour, t.tm_min, t.tm_sec)
+
+            return Response(
+                request,
+                body=json.dumps({"ok": not result["wifiError"], "timezone": new_tz, "name": tz_name}),
+                content_type="application/json"
+            )
+
+        except Exception as e:
+            print("set_timezone error:", e)
+            return Response(
+                request,
+                body='{"ok":false,"error":"Parse error"}',
+                content_type="application/json"
+            )
 
     return server
 

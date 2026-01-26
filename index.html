@@ -58,6 +58,9 @@
     .footer { margin-top:10px; font-size:12px; color:#ffffff; opacity:0.92; }
     .linkpill { display:inline-block; padding:6px 10px; border-radius:999px; border:1px solid rgba(255,255,255,0.30); background:rgba(255,255,255,0.06); color:#ffffff; text-decoration:none; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace; font-size:12px; }
     .linkpill:hover { background:rgba(255,255,255,0.12); }
+    select { width:100%; padding:8px 10px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.25); border-radius:8px; color:#fff; font-size:12px; font-family:inherit; cursor:pointer; }
+    select:focus { outline:none; box-shadow:var(--focus); }
+    select option, select optgroup { background:#1a1f27; color:#fff; }
   </style>
 </head>
 <body>
@@ -83,6 +86,7 @@
             <div class="k">Time</div><div class="v" id="time">...</div>
             <div class="k">Hour (12h)</div><div class="v" id="hour12">...</div>
             <div class="k">Timezone</div><div class="v" id="timezone">...</div>
+            <div class="k">Change Timezone</div><div class="v" style="padding:4px;"><select id="tzSelect"><option value="">Loading...</option></select></div>
             <div class="k">IP Address</div><div class="v" id="ipAddress">...</div>
             <div class="k">SSID</div><div class="v" id="ssid">...</div>
             <div class="k">Uptime</div><div class="v" id="uptime">...</div>
@@ -129,7 +133,7 @@
       setText('currentTime',d.time);
       setText('time',d.time);
       setText('hour12',d.hour_12);
-      setText('timezone',d.timezone);
+      setText('timezone',d.timezone_name||d.timezone);
       setText('ipAddress',d.ip_address);
       setText('ssid',d.ssid);
       setText('uptime',d.uptime_s+'s');
@@ -153,6 +157,46 @@
   function postAction(endpoint){
     fetch(endpoint,{method:'POST'}).then(function(){setTimeout(function(){refreshStatus();fetchLog();},500);}).catch(function(){});
   }
+  function loadTimezones(){
+    fetch('/get_timezone',{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){
+      var sel=document.getElementById('tzSelect');
+      if(!sel)return;
+      sel.innerHTML='';
+      var regions={'US':'United States','EU':'Europe','AS':'Asia','OC':'Oceania','':'Other'};
+      var groups={};
+      d.timezones.forEach(function(tz){
+        var region=tz.key.split('/')[0];
+        if(!groups[region])groups[region]=[];
+        groups[region].push(tz);
+      });
+      Object.keys(regions).forEach(function(rk){
+        var tzList=groups[rk]||(rk===''?groups['UTC']:[]);
+        if(!tzList||!tzList.length)return;
+        var og=document.createElement('optgroup');
+        og.label=regions[rk];
+        tzList.forEach(function(tz){
+          var opt=document.createElement('option');
+          opt.value=tz.key;
+          var hrs=tz.offset/60;
+          var sign=hrs>=0?'+':'';
+          var dstLbl=tz.dst?' *':'';
+          opt.textContent=tz.name+' (UTC'+sign+hrs+')'+dstLbl;
+          if(tz.key===d.current)opt.selected=true;
+          og.appendChild(opt);
+        });
+        sel.appendChild(og);
+      });
+    }).catch(function(){});
+  }
+  function setTimezone(tzKey){
+    fetch('/set_timezone',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({timezone:tzKey})})
+      .then(function(r){return r.json();})
+      .then(function(d){
+        if(d.ok){setTimeout(function(){refreshStatus();fetchLog();loadTimezones();},1000);}
+        else{alert('Failed: '+(d.error||'Unknown error'));}
+      }).catch(function(){alert('Error setting timezone');});
+  }
+  document.getElementById('tzSelect').addEventListener('change',function(){if(this.value)setTimezone(this.value);});
   document.getElementById('wipeBtn').addEventListener('click',function(){postAction('/wipe');});
   document.getElementById('refreshBtn').addEventListener('click',function(){postAction('/refresh');});
   document.getElementById('syncBtn').addEventListener('click',function(){postAction('/sync_wifi');});
@@ -161,6 +205,7 @@
   document.getElementById('homeBtn').addEventListener('click',function(){postAction('/home');});
   refreshStatus();
   fetchLog();
+  loadTimezones();
   setInterval(function(){refreshStatus();fetchLog();},5000);
 })();
 </script>
