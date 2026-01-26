@@ -28,7 +28,7 @@ import socketpool
 import adafruit_requests
 import adafruit_ntp
 import json
-import storage
+import microcontroller
 
 # Web Server Libraries
 from adafruit_httpserver import Server, Request, Response, POST
@@ -97,9 +97,6 @@ last_wifi_sync_time = "Never"
 
 # HTML Dashboard - loaded from index.html file
 INDEX_HTML_FILE = "/index.html"
-
-# Config file for runtime settings (timezone)
-CONFIG_FILE = "/config.json"
 
 # Timezone table: (key, display_name, utc_offset_minutes, dst_rule)
 # dst_rule: None=no DST, "US"=US rules, "EU"=EU rules, "AU"=AU rules, "NZ"=NZ rules
@@ -184,41 +181,32 @@ def get_uptime():
     return int(time.monotonic() - start_time)
 
 #%%----------------------------------------------------------------------------
-def load_config():
-    # Load config from JSON file, return dict with defaults if missing.
-    default_config = {"timezone": "US/Eastern"}
-    try:
-        with open(CONFIG_FILE, "r") as f:
-            config = json.loads(f.read())
-            for key in default_config:
-                if key not in config:
-                    config[key] = default_config[key]
-            return config
-    except (OSError, ValueError) as e:
-        print("Config load error, using defaults:", e)
-        return default_config
-
+# NVM Storage for Timezone (index 0 = timezone index into TIMEZONES tuple)
+# NVM persists across reboots without filesystem access
 #%%----------------------------------------------------------------------------
-def is_usb_connected():
-    # Check if USB is mounted (filesystem is read-only).
+def load_timezone_nvm():
+    # Load timezone key from NVM. Returns key string or default.
     try:
-        return storage.getmount("/").readonly
-    except Exception:
-        return False
-
-#%%----------------------------------------------------------------------------
-def save_config(config):
-    # Save config dict to JSON file.
-    if is_usb_connected():
-        print("Config save blocked: USB is connected (filesystem read-only)")
-        return False
-    try:
-        with open(CONFIG_FILE, "w") as f:
-            f.write(json.dumps(config))
-        return True
+        tz_index = microcontroller.nvm[0]
+        if tz_index < len(TIMEZONES):
+            return TIMEZONES[tz_index][0]
     except Exception as e:
-        print("Config save error:", e)
-        return False
+        print("NVM read error:", e)
+    return os.getenv("TIMEZONE", "US/Eastern")
+
+#%%----------------------------------------------------------------------------
+def save_timezone_nvm(tz_key):
+    # Save timezone key to NVM. Returns True on success.
+    for i, tz in enumerate(TIMEZONES):
+        if tz[0] == tz_key:
+            try:
+                microcontroller.nvm[0] = i
+                print("Timezone saved to NVM: index", i, tz_key)
+                return True
+            except Exception as e:
+                print("NVM write error:", e)
+                return False
+    return False
 
 #%%----------------------------------------------------------------------------
 # DST Calculation Functions
@@ -820,9 +808,8 @@ def getWifiTime():
     password = os.getenv("CIRCUITPY_WIFI_PASSWORD")
     ntp_server = os.getenv("NTP_SERVER", "pool.ntp.org")
 
-    # Load timezone from config.json (writable) or fallback to settings.toml
-    config = load_config()
-    timezone = config.get("timezone", os.getenv("TIMEZONE", "US/Eastern"))
+    # Load timezone from NVM or fallback to settings.toml
+    timezone = load_timezone_nvm()
 
     if not ssid or not password:
         print("WiFi credentials missing in settings.toml!")
@@ -1152,9 +1139,8 @@ def setupWebServer(pool):
 
         ssid = os.getenv("CIRCUITPY_WIFI_SSID", "Unknown")
 
-        # Load timezone from config.json
-        config = load_config()
-        tz = config.get("timezone", "US/Eastern")
+        # Load timezone from NVM
+        tz = load_timezone_nvm()
         tz_name = tz
         for timezone in TIMEZONES:
             if timezone[0] == tz:
@@ -1230,8 +1216,7 @@ def setupWebServer(pool):
     @server.route("/get_timezone")
     def get_timezone_route(request: Request):
         # Return current timezone and list of all available timezones.
-        config = load_config()
-        current_tz = config.get("timezone", "US/Eastern")
+        current_tz = load_timezone_nvm()
 
         tz_list = []
         for tz in TIMEZONES:
@@ -1250,17 +1235,8 @@ def setupWebServer(pool):
 
     @server.route("/set_timezone", POST)
     def set_timezone_route(request: Request):
-        # Set timezone, save to config, and immediately resync clock.
+        # Set timezone, save to NVM, and immediately resync clock.
         global last_wifi_sync_time
-
-        # Check if USB is connected (filesystem read-only)
-        if is_usb_connected():
-            log_action("Timezone change blocked: Disconnect USB first")
-            return Response(
-                request,
-                body='{"ok":false,"error":"USB connected - disconnect USB to save settings"}',
-                content_type="application/json"
-            )
 
         try:
             # Parse JSON body
@@ -1284,13 +1260,11 @@ def setupWebServer(pool):
                     content_type="application/json"
                 )
 
-            # Save to config
-            config = load_config()
-            config["timezone"] = new_tz
-            if not save_config(config):
+            # Save to NVM
+            if not save_timezone_nvm(new_tz):
                 return Response(
                     request,
-                    body='{"ok":false,"error":"Failed to save config"}',
+                    body='{"ok":false,"error":"Failed to save to NVM"}',
                     content_type="application/json"
                 )
 

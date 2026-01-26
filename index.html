@@ -110,6 +110,7 @@
           <div class="actions">
             <button id="hourPlusBtn">+1 Hour</button>
             <button id="minPlusBtn">+1 Minute</button>
+            <button class="primary" id="resetNtpBtn">Reset to NTP</button>
             <button id="homeBtn">Home Motor</button>
           </div>
         </div>
@@ -202,6 +203,7 @@
   document.getElementById('syncBtn').addEventListener('click',function(){postAction('/sync_wifi');});
   document.getElementById('hourPlusBtn').addEventListener('click',function(){postAction('/set_hour');});
   document.getElementById('minPlusBtn').addEventListener('click',function(){postAction('/set_min');});
+  document.getElementById('resetNtpBtn').addEventListener('click',function(){postAction('/sync_wifi');});
   document.getElementById('homeBtn').addEventListener('click',function(){postAction('/home');});
   refreshStatus();
   fetchLog();
