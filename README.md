@@ -6,7 +6,7 @@ A CircuitPython-based flip dot clock with a mechanical minute hand, running on a
 
 - **Flip Dot Hour Display**: 4-column flip dot display shows the current hour (1-12)
 - **Mechanical Minute Hand**: Stepper motor-driven minute hand with precision hall sensor homing
-- **WiFi Time Sync**: Automatic time synchronization via Adafruit IO with timezone support
+- **NTP Time Sync**: Automatic time synchronization via NTP with timezone and DST support
 - **OLED Status Display**: 128x64 SH1107 display showing time, WiFi status, and IP address
 - **Web Interface**: Browser-based dashboard for remote monitoring and control
 - **Physical Buttons**: 3 buttons for manual time adjustment and display control
@@ -72,11 +72,11 @@ Copy these libraries to the `lib/` folder on your CIRCUITPY drive:
 - `adafruit_display_text`
 - `adafruit_display_shapes`
 - `adafruit_dotstar`
-- `adafruit_fancyled`
 - `adafruit_requests`
 - `adafruit_httpserver`
+- `adafruit_ntp`
 
-### 3. Configure Credentials
+### 3. Configure Settings
 
 Copy `settings.toml.example` to `settings.toml` and fill in your details:
 
@@ -86,17 +86,21 @@ CIRCUITPY_WIFI_PASSWORD = "YOUR_WIFI_PASSWORD"
 CIRCUITPY_WEB_API_PASSWORD = "your_password"
 CIRCUITPY_WEB_API_PORT = 80
 
-TIMEZONE = "America/New_York"
+# NTP Server (default: pool.ntp.org)
+NTP_SERVER = "pool.ntp.org"
 
-AIO_USERNAME = "YOUR_AIO_USERNAME"
-AIO_KEY = "YOUR_AIO_KEY"
+# Default timezone (can be changed via web UI)
+TIMEZONE = "US/Eastern"
 ```
-
-Get free Adafruit IO credentials at: https://io.adafruit.com
 
 ### 4. Deploy
 
-Copy `code.py` and `settings.toml` to your CIRCUITPY drive.
+Copy the following files to your CIRCUITPY drive:
+- `code.py` - Main application
+- `boot.py` - Enables config saves when USB disconnected
+- `settings.toml` - WiFi and NTP configuration
+- `index.html` - Web dashboard
+- `config.json` - Runtime settings (created automatically)
 
 ## Configuration
 
@@ -122,6 +126,7 @@ The IP address is shown on the OLED display and printed to the serial console.
 ### Dashboard Features
 
 - **Clock Status**: Current time, hour (12h), timezone, IP, SSID, uptime, free memory
+- **Timezone Selector**: Dropdown to change timezone (18 worldwide options with DST support)
 - **Motor Status**: Current position, steps total, last hour shown, flipdot power state
 - **Control Buttons**: Wipe Display, Refresh Hour, Sync WiFi, +1 Hour, +1 Minute, Home Motor
 - **Action Log**: Timestamped history of actions
@@ -134,6 +139,8 @@ The IP address is shown on the OLED display and printed to the serial console.
 | `/` | GET | HTML dashboard |
 | `/status.json` | GET | Clock status as JSON |
 | `/log.json` | GET | Action log entries |
+| `/get_timezone` | GET | Current timezone and available options |
+| `/set_timezone` | POST | Set timezone (saves to config.json, resyncs clock) |
 | `/wipe` | POST | Run blank-white-blank sequence |
 | `/set_hour` | POST | Increment hour by 1 |
 | `/set_min` | POST | Increment minute by 1 |
@@ -151,7 +158,8 @@ The IP address is shown on the OLED display and printed to the serial console.
   "wifi_connected": true,
   "ip_address": "192.168.1.100",
   "ssid": "MyNetwork",
-  "timezone": "America/New_York",
+  "timezone": "US/Eastern",
+  "timezone_name": "Eastern (New York)",
   "motor_position": 467,
   "motor_steps_total": 800,
   "last_hour_shown": 2,
@@ -205,30 +213,40 @@ The "Home Motor" web button pauses at 12:00 for visual verification before the n
 
 ## Timezone Configuration
 
-Supported timezones (set in `settings.toml`):
+Timezone can be changed via the web UI dropdown or set as default in `settings.toml`. The selected timezone is saved to `config.json` and persists across reboots.
 
-**United States**
-- `America/New_York`
-- `America/Chicago`
-- `America/Denver`
-- `America/Los_Angeles`
-- `America/Phoenix`
+**Note**: To save timezone changes, USB must be disconnected. The `boot.py` file enables filesystem writes when the clock runs standalone.
 
-**Europe**
-- `Europe/London`
-- `Europe/Paris`
-- `Europe/Berlin`
+### Supported Timezones
 
-**Asia**
-- `Asia/Tokyo`
-- `Asia/Shanghai`
-- `Asia/Singapore`
+| Key | Name | UTC Offset | DST |
+|-----|------|------------|-----|
+| `US/Hawaii` | Hawaii | -10:00 | No |
+| `US/Alaska` | Alaska | -9:00 | Yes |
+| `US/Pacific` | Pacific (LA) | -8:00 | Yes |
+| `US/Mountain` | Mountain (Denver) | -7:00 | Yes |
+| `US/Arizona` | Arizona | -7:00 | No |
+| `US/Central` | Central (Chicago) | -6:00 | Yes |
+| `US/Eastern` | Eastern (New York) | -5:00 | Yes |
+| `EU/London` | London | +0:00 | Yes |
+| `EU/Paris` | Paris | +1:00 | Yes |
+| `EU/Berlin` | Berlin | +1:00 | Yes |
+| `EU/Moscow` | Moscow | +3:00 | No |
+| `AS/Dubai` | Dubai | +4:00 | No |
+| `AS/Mumbai` | Mumbai | +5:30 | No |
+| `AS/Singapore` | Singapore | +8:00 | No |
+| `AS/Tokyo` | Tokyo | +9:00 | No |
+| `OC/Sydney` | Sydney | +10:00 | Yes |
+| `OC/Auckland` | Auckland | +12:00 | Yes |
+| `UTC` | UTC | +0:00 | No |
 
-**Australia**
-- `Australia/Sydney`
-- `Australia/Melbourne`
+### DST Rules
 
-Full list: http://worldtimeapi.org/timezones
+Daylight Saving Time is automatically calculated for:
+- **US**: 2nd Sunday March → 1st Sunday November
+- **EU**: Last Sunday March → Last Sunday October
+- **AU**: 1st Sunday October → 1st Sunday April
+- **NZ**: Last Sunday September → 1st Sunday April
 
 ## Troubleshooting
 
