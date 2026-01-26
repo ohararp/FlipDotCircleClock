@@ -97,10 +97,8 @@ TIMEZONE = "US/Eastern"
 
 Copy the following files to your CIRCUITPY drive:
 - `code.py` - Main application
-- `boot.py` - Enables config saves when USB disconnected
 - `settings.toml` - WiFi and NTP configuration
 - `index.html` - Web dashboard
-- `config.json` - Runtime settings (created automatically)
 
 ## Configuration
 
@@ -128,7 +126,7 @@ The IP address is shown on the OLED display and printed to the serial console.
 - **Clock Status**: Current time, hour (12h), timezone, IP, SSID, uptime, free memory
 - **Timezone Selector**: Dropdown to change timezone (18 worldwide options with DST support)
 - **Motor Status**: Current position, steps total, last hour shown, flipdot power state
-- **Control Buttons**: Wipe Display, Refresh Hour, Sync WiFi, +1 Hour, +1 Minute, Home Motor
+- **Control Buttons**: Wipe Display, Refresh Hour, Sync WiFi, +1 Hour, +1 Minute, Reset to NTP, Home Motor
 - **Action Log**: Timestamped history of actions
 - **Auto-refresh**: Status updates every 5 seconds
 
@@ -140,7 +138,7 @@ The IP address is shown on the OLED display and printed to the serial console.
 | `/status.json` | GET | Clock status as JSON |
 | `/log.json` | GET | Action log entries |
 | `/get_timezone` | GET | Current timezone and available options |
-| `/set_timezone` | POST | Set timezone (saves to config.json, resyncs clock) |
+| `/set_timezone` | POST | Set timezone (saves to NVM, resyncs clock) |
 | `/wipe` | POST | Run blank-white-blank sequence |
 | `/set_hour` | POST | Increment hour by 1 |
 | `/set_min` | POST | Increment minute by 1 |
@@ -213,9 +211,9 @@ The "Home Motor" web button pauses at 12:00 for visual verification before the n
 
 ## Timezone Configuration
 
-Timezone can be changed via the web UI dropdown or set as default in `settings.toml`. The selected timezone is saved to `config.json` and persists across reboots.
+Timezone can be changed via the web UI dropdown or set as default in `settings.toml`. The selected timezone is saved to the microcontroller's non-volatile memory (NVM) and persists across reboots.
 
-**Note**: To save timezone changes, USB must be disconnected. The `boot.py` file enables filesystem writes when the clock runs standalone.
+Timezone changes work even with USB connected - no need to disconnect.
 
 ### Supported Timezones
 
