@@ -641,10 +641,28 @@ def findExactHome(delay):
     edge_b = stepNow
     print('Edge B at step: %d' % edge_b)
 
-    # Step 5: Calculate center and move there
-    magnet_width = abs(edge_a - edge_b)
-    center = (edge_a + edge_b) // 2
+    # Step 5: Calculate center and move there (with wrap-around handling)
+    raw_diff = abs(edge_a - edge_b)
+
+    # Check if edges wrap around the 0/STEPS boundary
+    if raw_diff > STEPS // 2:
+        # Wrap-around case: add STEPS to the smaller edge before averaging
+        if edge_a < edge_b:
+            center = ((edge_a + STEPS) + edge_b) // 2 % STEPS
+        else:
+            center = (edge_a + (edge_b + STEPS)) // 2 % STEPS
+        magnet_width = STEPS - raw_diff  # Correct width for wrap-around
+    else:
+        center = (edge_a + edge_b) // 2
+        magnet_width = raw_diff
+
     steps_to_center = center - stepNow
+
+    # Handle wrap-around for movement calculation
+    if steps_to_center > STEPS // 2:
+        steps_to_center -= STEPS
+    elif steps_to_center < -STEPS // 2:
+        steps_to_center += STEPS
 
     print('Magnet width: %d steps' % magnet_width)
     print('Center at: %d, moving %d steps' % (center, steps_to_center))
