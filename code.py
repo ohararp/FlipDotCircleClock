@@ -788,6 +788,87 @@ def hrUpdate(forceHour=False):
         lastHourShown = hr12
 
 #%%----------------------------------------------------------------------------
+# Animation Functions
+#%%----------------------------------------------------------------------------
+def anim_demo():
+    # Full demo: sweep hand 360°, count through hours, restore time
+    flipsPower(True)
+    try:
+        # Sweep minute hand full rotation
+        multiStep(1, STEPS, 0.003)
+        # Count through hours 1-12
+        for h in range(1, 13):
+            setFlips(hourIn(h), 1, managePower=False)
+            time.sleep(0.3)
+        # Blank
+        setFlips([0, 0, 0, 0], 1, managePower=False)
+        time.sleep(0.2)
+    finally:
+        extendFlipPowerWindow()
+    # Restore time
+    findExactHome(0.002125)
+    hrUpdate(forceHour=True)
+    minUpdate()
+
+def anim_chase():
+    # Chase pattern: flipdots ripple, hand follows
+    flipsPower(True)
+    try:
+        findExactHome(0.002125)  # Start at 12
+        steps_per_hour = STEPS // 12
+        for h in range(1, 13):
+            # Move hand to hour position
+            multiStep(1, steps_per_hour, 0.003)
+            # Light up matching hour
+            setFlips(hourIn(h), 1, managePower=False)
+            time.sleep(0.15)
+        # Blank at end
+        setFlips([0, 0, 0, 0], 1, managePower=False)
+        time.sleep(0.1)
+    finally:
+        extendFlipPowerWindow()
+    # Restore time
+    findExactHome(0.002125)
+    hrUpdate(forceHour=True)
+    minUpdate()
+
+def anim_chaos():
+    # Random chaos: random flipdots, oscillating hand
+    flipsPower(True)
+    try:
+        for _ in range(20):
+            setFlips(hourIn(r.randint(0, 12)), 1, managePower=False)
+            # Oscillate hand randomly
+            multiStep(r.choice([0, 1]), r.randint(20, 100), 0.002)
+            time.sleep(0.08)
+    finally:
+        extendFlipPowerWindow()
+    # Restore time
+    findExactHome(0.002125)
+    hrUpdate(forceHour=True)
+    minUpdate()
+
+def anim_sync():
+    # Sync dance: hand sweeps to each hour, flipdots light up in sync
+    flipsPower(True)
+    try:
+        setFlips([0, 0, 0, 0], 1, managePower=False)  # Start blank
+        findExactHome(0.002125)  # Start at 12
+        steps_per_hour = STEPS // 12
+        for h in range(1, 13):
+            # Move hand to hour position
+            multiStep(1, steps_per_hour, 0.004)
+            # Light up matching hour
+            setFlips(hourIn(h), 1, managePower=False)
+            time.sleep(0.25)
+    finally:
+        extendFlipPowerWindow()
+    # Restore time
+    findExactHome(0.002125)
+    hrUpdate(forceHour=True)
+    minUpdate()
+
+#%%----------------------------------------------------------------------------
 def setupDot():
     # Initialize DotStar and define global color constants.
     numPixels = 1
@@ -1313,6 +1394,31 @@ def setupWebServer(pool):
                 body='{"ok":false,"error":"Parse error"}',
                 content_type="application/json"
             )
+
+    # Animation routes
+    @server.route("/anim/demo", POST)
+    def anim_demo_route(request: Request):
+        log_action("Animation: Demo sequence")
+        anim_demo()
+        return Response(request, body='{"ok":true}', content_type="application/json")
+
+    @server.route("/anim/chase", POST)
+    def anim_chase_route(request: Request):
+        log_action("Animation: Chase pattern")
+        anim_chase()
+        return Response(request, body='{"ok":true}', content_type="application/json")
+
+    @server.route("/anim/chaos", POST)
+    def anim_chaos_route(request: Request):
+        log_action("Animation: Random chaos")
+        anim_chaos()
+        return Response(request, body='{"ok":true}', content_type="application/json")
+
+    @server.route("/anim/sync", POST)
+    def anim_sync_route(request: Request):
+        log_action("Animation: Sync dance")
+        anim_sync()
+        return Response(request, body='{"ok":true}', content_type="application/json")
 
     return server
 
