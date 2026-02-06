@@ -84,7 +84,7 @@ Copy `settings.toml.example` to `settings.toml` and fill in your details:
 CIRCUITPY_WIFI_SSID = "YOUR_WIFI_SSID"
 CIRCUITPY_WIFI_PASSWORD = "YOUR_WIFI_PASSWORD"
 CIRCUITPY_WEB_API_PASSWORD = "your_password"
-CIRCUITPY_WEB_API_PORT = 80
+CIRCUITPY_WEB_API_PORT = 8080  # CircuitPython code editor port
 
 # NTP Server (default: pool.ntp.org)
 NTP_SERVER = "pool.ntp.org"
@@ -92,6 +92,8 @@ NTP_SERVER = "pool.ntp.org"
 # Default timezone (can be changed via web UI)
 TIMEZONE = "US/Eastern"
 ```
+
+**Note:** The clock web interface runs on port 80 (default HTTP). The CircuitPython code editor runs on port 8080.
 
 ### 4. Deploy
 
@@ -114,9 +116,14 @@ flipdotDelay    = 0.5    # seconds between flipdot actuations (capacitor recharg
 
 ## Web Interface
 
-Once connected to WiFi, the clock starts a web server on port 5000:
+Once connected to WiFi, the clock starts a web server on port 80:
 ```
-http://<ip-address>:5000/
+http://<ip-address>/
+```
+
+The CircuitPython code editor is available on port 8080:
+```
+http://<ip-address>:8080/
 ```
 
 The IP address is shown on the OLED display and printed to the serial console.
@@ -200,7 +207,7 @@ The "Home Motor" web button pauses at 12:00 for visual verification before the n
 4. Display current hour on flipdots
 5. Position minute hand
 6. Connect to WiFi and sync time
-7. Start web server on port 5000
+7. Start web server on port 80
 8. Enter main loop
 
 ### Main Loop
@@ -267,7 +274,8 @@ Daylight Saving Time is automatically calculated for:
 
 ### Web Interface Not Loading
 - Confirm WiFi connected (check OLED display)
-- Note: web server runs on **port 5000**, not 80
+- Clock interface runs on **port 80** (default HTTP)
+- CircuitPython code editor runs on **port 8080**
 - Try accessing `/status.json` directly
 - Check serial console for server errors
 

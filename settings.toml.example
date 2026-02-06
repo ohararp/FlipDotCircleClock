@@ -5,9 +5,10 @@
 CIRCUITPY_WIFI_SSID = "YOUR_WIFI_SSID"
 CIRCUITPY_WIFI_PASSWORD = "YOUR_WIFI_PASSWORD"
 
-# Web workflow settings (optional)
+# Web workflow settings (optional) - code editor runs on this port
+# Clock interface uses port 80, code editor uses port 8080
 CIRCUITPY_WEB_API_PASSWORD = "your_password"
-CIRCUITPY_WEB_API_PORT = 80
+CIRCUITPY_WEB_API_PORT = 8080
 
 # Timezone (see http://worldtimeapi.org/timezones for full list)
 # Examples: America/New_York, America/Chicago, America/Los_Angeles
