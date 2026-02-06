@@ -140,9 +140,19 @@ The IP address is shown on the OLED display and printed to the serial console.
 - **Clock Status**: Current time, hour (12h), timezone, IP, SSID, uptime, free memory
 - **Timezone Selector**: Dropdown to change timezone (18 worldwide options with DST support)
 - **Motor Status**: Current position, steps total, last hour shown, flipdot power state
-- **Control Buttons**: Wipe Display, Refresh Hour, Sync WiFi, +1 Hour, +1 Minute, Reset to NTP, Home Motor
+- **Control Buttons**: Reset to NTP, +1 Hour, +1 Minute, Wipe Display, Sync WiFi
+- **Animation Buttons**: Demo, Chase, Chaos, Sync (showcase flipdots and minute hand)
 - **Action Log**: Timestamped history of actions
 - **Auto-refresh**: Status updates every 5 seconds
+
+### Animations
+
+| Animation | Description |
+|-----------|-------------|
+| **Demo** | Full 360° minute hand sweep, counts flipdots 1→12→blank, restores time |
+| **Chase** | Flipdots ripple 1→12 while minute hand follows along |
+| **Chaos** | Random flipdot patterns with oscillating hand movement |
+| **Sync** | Hand sweeps to each hour position, flipdots light up in sync |
 
 ### API Endpoints
 
@@ -153,12 +163,14 @@ The IP address is shown on the OLED display and printed to the serial console.
 | `/log.json` | GET | Action log entries |
 | `/get_timezone` | GET | Current timezone and available options |
 | `/set_timezone` | POST | Set timezone (saves to NVM, resyncs clock) |
-| `/wipe` | POST | Run blank-white-blank sequence |
+| `/wipe` | POST | Full reset: blank display, re-home motor, redisplay time |
 | `/set_hour` | POST | Increment hour by 1 |
 | `/set_min` | POST | Increment minute by 1 |
-| `/refresh` | POST | Force flipdot hour refresh |
-| `/home` | POST | Re-home motor (pauses at 12:00 for verification) |
 | `/sync_wifi` | POST | Trigger WiFi time sync |
+| `/anim/demo` | POST | Run demo animation sequence |
+| `/anim/chase` | POST | Run chase/wave animation |
+| `/anim/chaos` | POST | Run random chaos animation |
+| `/anim/sync` | POST | Run synchronized dance animation |
 
 ### Status JSON Response
 
