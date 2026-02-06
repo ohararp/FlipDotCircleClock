@@ -68,6 +68,9 @@ oePin.value = OE_DISABLE
 # Initialize Step Counter
 stepNow = 0
 lastHourShown = None
+
+# Calibration tracking (for interactive calibration via web UI)
+calibration_steps = 0  # Tracks nudges during calibration session
  
 # Stepper Motor Setup
 motorEnabled  = False   # active-low
@@ -207,6 +210,36 @@ def save_timezone_nvm(tz_key):
                 print("NVM write error:", e)
                 return False
     return False
+
+#%%----------------------------------------------------------------------------
+def load_home_offset_nvm():
+    # Load home offset from NVM byte 1. Returns signed int (-127 to +127).
+    # NVM byte 0 means uninitialized = no offset
+    # NVM byte 1-255 maps to offset -127 to +127 (stored = offset + 128)
+    try:
+        stored = microcontroller.nvm[1]
+        if stored == 0:  # Uninitialized NVM
+            return 0
+        offset = stored - 128  # Convert from unsigned (1-255) to signed (-127 to +127)
+        return offset
+    except Exception as e:
+        print("NVM home offset read error:", e)
+    return 0
+
+#%%----------------------------------------------------------------------------
+def save_home_offset_nvm(offset):
+    # Save home offset to NVM byte 1. Offset must be -127 to +127.
+    # stored = offset + 128, so offset 0 = stored 128
+    try:
+        # Clamp to valid range (-127 to +127, since stored 0 = uninitialized)
+        offset = max(-127, min(127, offset))
+        stored = offset + 128  # Convert from signed to unsigned (1-255)
+        microcontroller.nvm[1] = stored
+        print("Home offset saved to NVM:", offset, "steps")
+        return True
+    except Exception as e:
+        print("NVM home offset write error:", e)
+        return False
 
 #%%----------------------------------------------------------------------------
 # DST Calculation Functions
@@ -677,6 +710,17 @@ def findExactHome(delay):
     # Step 6: Set home position
     stepNow = 0
     print('Home set at center of magnet')
+
+    # Step 7: Apply calibration offset from NVM
+    offset = load_home_offset_nvm()
+    if offset != 0:
+        print('Applying home offset: %d steps' % offset)
+        if offset > 0:
+            multiStep(1, offset, delay)  # CW
+        else:
+            multiStep(0, abs(offset), delay)  # CCW
+        stepNow = 0  # Reset after offset applied
+        print('Offset applied, home position adjusted')
 
     return magnet_width
 
@@ -1301,13 +1345,6 @@ def setupWebServer(pool):
         hrUpdate(forceHour=True)
         return Response(request, body='{"ok":true}', content_type="application/json")
 
-    @server.route("/home", POST)
-    def home_route(request: Request):
-        log_action("Home motor via web - pausing at 12:00")
-        findExactHome(0.002125)
-        # Don't call minUpdate() - leave hand at 12:00 for visual verification
-        return Response(request, body='{"ok":true,"msg":"Homed to 12:00 - hand will stay here until next minute update"}', content_type="application/json")
-
     @server.route("/sync_wifi", POST)
     def sync_wifi_route(request: Request):
         global last_wifi_sync_time
@@ -1419,6 +1456,53 @@ def setupWebServer(pool):
         log_action("Animation: Sync dance")
         anim_sync()
         return Response(request, body='{"ok":true}', content_type="application/json")
+
+    @server.route("/home", POST)
+    def home_route(request: Request):
+        # Home minute hand, pause at 12 o'clock, then return to current time
+        log_action("Home motor triggered via web")
+        findExactHome(0.002125)  # Use current algorithm (swap to V2 after testing)
+        time.sleep(2)  # Pause at 12 o'clock for verification
+        minUpdate()  # Return to current time
+        return Response(request, body='{"ok":true}', content_type="application/json")
+
+    @server.route("/calibrate", POST)
+    def calibrate_route(request: Request):
+        # Home motor and stay at 12 o'clock for calibration
+        global calibration_steps
+        calibration_steps = 0  # Reset nudge counter
+        log_action("Calibration started")
+        findExactHome(0.002125)
+        # Don't call minUpdate - stay at 12 o'clock for adjustment
+        offset = load_home_offset_nvm()
+        return Response(request, body='{"ok":true,"offset":%d,"nudged":0}' % offset, content_type="application/json")
+
+    @server.route("/nudge_cw", POST)
+    def nudge_cw_route(request: Request):
+        # Nudge hand 1 step clockwise
+        global calibration_steps
+        oneStep(1, 0.005)
+        calibration_steps += 1
+        return Response(request, body='{"ok":true,"nudged":%d}' % calibration_steps, content_type="application/json")
+
+    @server.route("/nudge_ccw", POST)
+    def nudge_ccw_route(request: Request):
+        # Nudge hand 1 step counter-clockwise
+        global calibration_steps
+        oneStep(0, 0.005)
+        calibration_steps -= 1
+        return Response(request, body='{"ok":true,"nudged":%d}' % calibration_steps, content_type="application/json")
+
+    @server.route("/set_home", POST)
+    def set_home_route(request: Request):
+        # Save current position as new home offset
+        global calibration_steps
+        current_offset = load_home_offset_nvm()
+        new_offset = current_offset + calibration_steps
+        save_home_offset_nvm(new_offset)
+        log_action("Home offset set to %d steps" % new_offset)
+        calibration_steps = 0
+        return Response(request, body='{"ok":true,"offset":%d}' % new_offset, content_type="application/json")
 
     return server
 

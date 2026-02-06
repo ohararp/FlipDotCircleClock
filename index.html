@@ -110,12 +110,20 @@
           <div class="actions">
             <button id="wipeBtn">Wipe Display</button>
             <button id="syncBtn">Sync WiFi</button>
+            <button id="homeBtn">Home</button>
           </div>
           <div class="actions">
             <button id="animDemoBtn">Demo</button>
             <button id="animChaseBtn">Chase</button>
             <button id="animChaosBtn">Chaos</button>
             <button id="animSyncBtn">Sync</button>
+          </div>
+          <div class="actions">
+            <button id="calibrateBtn">Calibrate</button>
+            <button id="nudgeCcwBtn">- CCW</button>
+            <button id="nudgeCwBtn">+ CW</button>
+            <button id="setHomeBtn">Set Home</button>
+            <span style="font-size:12px;opacity:0.8;margin-left:8px;">Offset: <span id="calibOffset">0</span></span>
           </div>
         </div>
       </div>
@@ -211,6 +219,29 @@
   document.getElementById('animChaseBtn').addEventListener('click',function(){postAction('/anim/chase');});
   document.getElementById('animChaosBtn').addEventListener('click',function(){postAction('/anim/chaos');});
   document.getElementById('animSyncBtn').addEventListener('click',function(){postAction('/anim/sync');});
+  document.getElementById('homeBtn').addEventListener('click',function(){postAction('/home');});
+  document.getElementById('calibrateBtn').addEventListener('click',function(){
+    fetch('/calibrate',{method:'POST'}).then(function(r){return r.json();}).then(function(d){
+      if(d.ok){document.getElementById('calibOffset').textContent=d.offset+' (nudged: 0)';}
+      setTimeout(function(){fetchLog();},500);
+    }).catch(function(){});
+  });
+  document.getElementById('nudgeCcwBtn').addEventListener('click',function(){
+    fetch('/nudge_ccw',{method:'POST'}).then(function(r){return r.json();}).then(function(d){
+      if(d.ok){document.getElementById('calibOffset').textContent='nudged: '+d.nudged;}
+    }).catch(function(){});
+  });
+  document.getElementById('nudgeCwBtn').addEventListener('click',function(){
+    fetch('/nudge_cw',{method:'POST'}).then(function(r){return r.json();}).then(function(d){
+      if(d.ok){document.getElementById('calibOffset').textContent='nudged: '+d.nudged;}
+    }).catch(function(){});
+  });
+  document.getElementById('setHomeBtn').addEventListener('click',function(){
+    fetch('/set_home',{method:'POST'}).then(function(r){return r.json();}).then(function(d){
+      if(d.ok){document.getElementById('calibOffset').textContent=d.offset+' (saved)';}
+      setTimeout(function(){fetchLog();},500);
+    }).catch(function(){});
+  });
   refreshStatus();
   fetchLog();
   loadTimezones();

@@ -171,6 +171,11 @@ The IP address is shown on the OLED display and printed to the serial console.
 | `/anim/chase` | POST | Run chase/wave animation |
 | `/anim/chaos` | POST | Run random chaos animation |
 | `/anim/sync` | POST | Run synchronized dance animation |
+| `/home` | POST | Home motor, pause 2s at 12 o'clock, return to time |
+| `/calibrate` | POST | Home motor and stay at 12 o'clock for calibration |
+| `/nudge_cw` | POST | Move hand 1 step clockwise |
+| `/nudge_ccw` | POST | Move hand 1 step counter-clockwise |
+| `/set_home` | POST | Save current position as home offset (persists to NVM) |
 
 ### Status JSON Response
 
@@ -215,7 +220,17 @@ The minute hand uses a hall sensor and magnet for precise homing. The algorithm 
 
 Both edges are detected at the **release point** for consistency, eliminating hall sensor hysteresis variations.
 
-The "Home Motor" web button pauses at 12:00 for visual verification before the next minute update moves the hand.
+The "Home" web button pauses at 12:00 for visual verification before the next minute update moves the hand.
+
+## Home Position Calibration
+
+If the minute hand doesn't align exactly at 12 o'clock after homing, use the web UI calibration controls to fine-tune:
+
+1. Click **Calibrate** - homes the motor and stays at 12 o'clock position
+2. Use **+ CW** / **- CCW** buttons to nudge the hand until it points exactly at 12
+3. Click **Set Home** - saves the offset to NVM (persists across reboots)
+
+The offset (range: -127 to +127 steps) is automatically applied after every homing operation.
 
 ## Operation
 
