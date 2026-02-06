@@ -86,6 +86,9 @@ CIRCUITPY_WIFI_PASSWORD = "YOUR_WIFI_PASSWORD"
 CIRCUITPY_WEB_API_PASSWORD = "your_password"
 CIRCUITPY_WEB_API_PORT = 8080  # CircuitPython code editor port
 
+# Clock web interface port
+CLOCK_WEB_PORT = 80
+
 # NTP Server (default: pool.ntp.org)
 NTP_SERVER = "pool.ntp.org"
 
@@ -93,7 +96,11 @@ NTP_SERVER = "pool.ntp.org"
 TIMEZONE = "US/Eastern"
 ```
 
-**Note:** The clock web interface runs on port 80 (default HTTP). The CircuitPython code editor runs on port 8080.
+**Port Configuration:**
+- `CLOCK_WEB_PORT` - Clock web interface (default: 80)
+- `CIRCUITPY_WEB_API_PORT` - CircuitPython code editor (default: 8080)
+
+**Code Editor Authentication:** Username is empty (leave blank), password is `CIRCUITPY_WEB_API_PASSWORD`
 
 ### 4. Deploy
 

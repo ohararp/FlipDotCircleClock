@@ -1388,8 +1388,9 @@ if not wifi_status["wifiError"]:
     try:
         pool = socketpool.SocketPool(wifi.radio)
         server = setupWebServer(pool)
-        server.start(str(wifi.radio.ipv4_address))
-        print("Web server started at http://{}".format(wifi.radio.ipv4_address))
+        clock_web_port = int(os.getenv("CLOCK_WEB_PORT", "80"))
+        server.start(str(wifi.radio.ipv4_address), port=clock_web_port)
+        print("Web server started at http://{}:{}".format(wifi.radio.ipv4_address, clock_web_port))
         log_action("Web server started")
     except Exception as e:
         print("Web server failed to start:", e)
