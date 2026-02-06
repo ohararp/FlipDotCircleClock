@@ -1191,7 +1191,13 @@ def setupWebServer(pool):
     @server.route("/wipe", POST)
     def wipe_route(request: Request):
         log_action("Wipe display triggered via web")
-        blankDisplay()
+        blankDisplay()                        # Clear display
+        t = rtc.datetime
+        numIn = hour24ToHour12(t.tm_hour)
+        roundTo(numIn)                        # Animate flipdots to current hour
+        findExactHome(0.002125)               # Re-home minute hand
+        hrUpdate(forceHour=True)              # Force hour refresh
+        minUpdate()                           # Sync minute hand
         return Response(request, body='{"ok":true}', content_type="application/json")
 
     @server.route("/set_hour", POST)

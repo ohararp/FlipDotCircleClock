@@ -93,11 +93,6 @@
             <div class="k">Free Memory</div><div class="v" id="freeMemory">...</div>
             <div class="k">Last WiFi Sync</div><div class="v" id="lastSync">...</div>
           </div>
-          <div class="actions">
-            <button class="primary" id="wipeBtn">Wipe Display</button>
-            <button id="refreshBtn">Refresh Hour</button>
-            <button id="syncBtn">Sync WiFi</button>
-          </div>
         </div>
         <div class="section">
           <h2>Motor &amp; Display</h2>
@@ -108,10 +103,13 @@
             <div class="k">Flipdot Power</div><div class="v" id="flipPower">...</div>
           </div>
           <div class="actions">
+            <button class="primary" id="resetNtpBtn">Reset to NTP</button>
             <button id="hourPlusBtn">+1 Hour</button>
             <button id="minPlusBtn">+1 Minute</button>
-            <button class="primary" id="resetNtpBtn">Reset to NTP</button>
-            <button id="homeBtn">Home Motor</button>
+          </div>
+          <div class="actions">
+            <button id="wipeBtn">Wipe Display</button>
+            <button id="syncBtn">Sync WiFi</button>
           </div>
         </div>
       </div>
@@ -199,12 +197,10 @@
   }
   document.getElementById('tzSelect').addEventListener('change',function(){if(this.value)setTimezone(this.value);});
   document.getElementById('wipeBtn').addEventListener('click',function(){postAction('/wipe');});
-  document.getElementById('refreshBtn').addEventListener('click',function(){postAction('/refresh');});
   document.getElementById('syncBtn').addEventListener('click',function(){postAction('/sync_wifi');});
   document.getElementById('hourPlusBtn').addEventListener('click',function(){postAction('/set_hour');});
   document.getElementById('minPlusBtn').addEventListener('click',function(){postAction('/set_min');});
   document.getElementById('resetNtpBtn').addEventListener('click',function(){postAction('/sync_wifi');});
-  document.getElementById('homeBtn').addEventListener('click',function(){postAction('/home');});
   refreshStatus();
   fetchLog();
   loadTimezones();
