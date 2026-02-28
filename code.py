@@ -1,4 +1,30 @@
 #%%----------------------------------------------------------------------------
+# FlipDotCircleClock - CircuitPython Flip Dot Clock with Mechanical Minute Hand
+#
+# Supported Hardware:
+#   - UnexpectedMaker Feather S2 (ESP32-S2)
+#   - UnexpectedMaker Feather S3 (ESP32-S3)
+#
+# Required External Hardware:
+#   - Flip Dot Display (4-column matrix) via SPI
+#   - Stepper Motor with Driver (A4988/DRV8825) for minute hand
+#   - Hall Effect Sensor for home position detection
+#   - DS3231 RTC Module (I2C)
+#   - SH1107 128x64 OLED Display (I2C)
+#   - 24V Relay Module for flip dot power
+#   - 3x Momentary Push Buttons
+#   - 24V Power Supply for flip dots
+#   - Magnet on minute hand for hall sensor
+#
+# Pin Configuration (same for S2 and S3):
+#   SPI (Flip Dots): SCK=IO36, MOSI=IO35, LATCH=IO37, OE=IO18
+#   Stepper: EN=IO6, STEP=IO12, DIR=IO5, HOME=IO14, MODE=IO17
+#   Buttons: A=IO1, B=IO38, C=IO33
+#   Relay: IO11
+#   I2C: SDA/SCL (default pins)
+#   LED: DotStar (S2) or NeoPixel (S3) - auto-detected
+#
+#%%----------------------------------------------------------------------------
 # General Libraries
 import time, gc, os
 import rtc
@@ -33,8 +59,27 @@ import microcontroller
 # Web Server Libraries
 from adafruit_httpserver import Server, Request, Response, POST
 
-# LED Libraries
-import adafruit_dotstar
+# LED Libraries - auto-detect board type
+# Feather S2 uses DotStar (APA102), Feather S3 uses NeoPixel (WS2812)
+BOARD_TYPE = "unknown"
+if hasattr(board, 'APA102_SCK'):
+    # Feather S2 - has DotStar LED
+    import adafruit_dotstar
+    BOARD_TYPE = "feather_s2"
+elif hasattr(board, 'NEOPIXEL'):
+    # Feather S3 - has NeoPixel LED
+    import neopixel
+    BOARD_TYPE = "feather_s3"
+else:
+    # Fallback - try DotStar
+    try:
+        import adafruit_dotstar
+        BOARD_TYPE = "feather_s2"
+    except ImportError:
+        import neopixel
+        BOARD_TYPE = "feather_s3"
+
+print(f"Detected board type: {BOARD_TYPE}")
 
 
 # Panel Header
@@ -914,12 +959,24 @@ def anim_sync():
 
 #%%----------------------------------------------------------------------------
 def setupDot():
-    # Initialize DotStar and define global color constants.
-    numPixels = 1
-    dotstar = adafruit_dotstar.DotStar(
-        board.APA102_SCK, board.APA102_MOSI, numPixels,
-        brightness=1.0, auto_write=True
-    )
+    # Initialize onboard LED and define global color constants.
+    # Supports both DotStar (Feather S2) and NeoPixel (Feather S3).
+    global BOARD_TYPE
+
+    if BOARD_TYPE == "feather_s3":
+        # Feather S3: NeoPixel on GPIO40, power on GPIO39
+        # Enable the NeoPixel power (LDO2)
+        if hasattr(board, 'NEOPIXEL_POWER'):
+            neopixel_power = digitalio.DigitalInOut(board.NEOPIXEL_POWER)
+            neopixel_power.direction = digitalio.Direction.OUTPUT
+            neopixel_power.value = True
+        pixel = neopixel.NeoPixel(board.NEOPIXEL, 1, brightness=1.0, auto_write=True)
+    else:
+        # Feather S2: DotStar on APA102 pins
+        pixel = adafruit_dotstar.DotStar(
+            board.APA102_SCK, board.APA102_MOSI, 1,
+            brightness=1.0, auto_write=True
+        )
 
     global RED, YELLOW, ORANGE, GREEN, TEAL, CYAN, BLUE, PURPLE, MAGENTA, WHITE
     RED     = (255, 0, 0)
@@ -933,12 +990,19 @@ def setupDot():
     MAGENTA = (255, 0, 20)
     WHITE   = (255, 255, 255)
 
-    return dotstar
+    return pixel
 
 #%%----------------------------------------------------------------------------
 def setDotstar(color, brightness):
-    # Set DotStar color and brightness.
-    dotstar[0] = (color[0], color[1], color[2], brightness)
+    # Set onboard LED color and brightness.
+    # Works with both DotStar (S2) and NeoPixel (S3).
+    if BOARD_TYPE == "feather_s3":
+        # NeoPixel: brightness is set on the pixel object, not per-pixel
+        dotstar.brightness = brightness
+        dotstar[0] = color
+    else:
+        # DotStar: supports per-pixel brightness as 4th tuple element
+        dotstar[0] = (color[0], color[1], color[2], brightness)
 
 #%%----------------------------------------------------------------------------
 def getWifiTime():

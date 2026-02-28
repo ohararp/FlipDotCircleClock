@@ -1,6 +1,6 @@
 # FlipDotCircleClock
 
-A CircuitPython-based flip dot clock with a mechanical minute hand, running on a Feather S2 microcontroller. Features WiFi time synchronization, OLED status display, and a web interface for remote monitoring and control.
+A CircuitPython-based flip dot clock with a mechanical minute hand, running on UnexpectedMaker Feather S2 or S3 microcontrollers. Features WiFi time synchronization, OLED status display, and a web interface for remote monitoring and control.
 
 ## Features
 
@@ -15,66 +15,170 @@ A CircuitPython-based flip dot clock with a mechanical minute hand, running on a
 ## Requirements
 
 - **CircuitPython 10.x** (tested on 10.0.3)
-- Feather S2 (ESP32-S2)
+- **Supported Boards:**
+  - UnexpectedMaker Feather S2 (ESP32-S2)
+  - UnexpectedMaker Feather S3 (ESP32-S3)
 
-## Hardware
+## Hardware Requirements
 
-### Components
-| Component | Connection | Description |
-|-----------|------------|-------------|
-| Flip Dot Display | SPI (IO35, IO36, IO37, IO18) | 4-column flip dot matrix |
-| Stepper Motor | IO5, IO6, IO12, IO14, IO17 | Direct-drive minute hand |
-| DS3231 RTC | I2C | Battery-backed timekeeping |
-| SH1107 OLED | I2C (0x3C) | 128x64 status display |
-| Relay | IO11 | 24V flipdot power control |
-| Button A | IO1 | Display animation/reset |
-| Button B | IO38 | +1 Hour |
-| Button C | IO33 | +1 Minute |
-| Hall Sensor | IO14 | Motor home position detection |
-| DotStar LED | APA102 | Status indicator |
+### Microcontroller Board
+
+| Board | Processor | WiFi | Onboard LED | Purchase Link |
+|-------|-----------|------|-------------|---------------|
+| **Feather S2** | ESP32-S2 240MHz | 2.4GHz | DotStar (APA102) | [Adafruit](https://www.adafruit.com/product/5000) |
+| **Feather S3** | ESP32-S3 240MHz Dual-Core | 2.4GHz + BLE 5.0 | NeoPixel (WS2812) | [Adafruit](https://www.adafruit.com/product/5399) |
+
+Both boards use the same pin layout - the code auto-detects which board is running.
+
+### Required External Components
+
+| Component | Specifications | Purpose | Approx. Cost |
+|-----------|---------------|---------|--------------|
+| **Flip Dot Display** | 4-column flip dot matrix, 24V | Hour display (1-12) | $50-150 |
+| **Stepper Motor** | NEMA 17 or similar, 1.8°/step | Minute hand drive | $10-20 |
+| **Stepper Driver** | A4988 or DRV8825 | Motor control with microstepping | $2-10 |
+| **DS3231 RTC Module** | I2C, with CR2032 battery | Battery-backed timekeeping | $3-10 |
+| **SH1107 OLED Display** | 128x64, I2C @ 0x3C | Status display | $8-15 |
+| **5V Relay Module** | Single channel, 24V/10A rated | Flip dot power switching | $2-5 |
+| **Hall Effect Sensor** | A3144 or similar, digital output | Home position detection | $1-3 |
+| **Momentary Push Buttons** | 3x normally-open | Manual controls | $1-3 |
+| **24V Power Supply** | 2A minimum | Flip dot power | $10-20 |
+| **Neodymium Magnet** | Small disc, ~5mm | Minute hand home marker | $1-2 |
+| **5V Power Supply** | USB-C or 5V adapter | Microcontroller power | $5-10 |
+
+### Wiring Diagram
+
+```
+                    +--------+
+                    | Feather|
+                    | S2/S3  |
+                    +---++---+
+                        ||
+    +-------------------++-------------------+
+    |                   ||                   |
+    v                   v                    v
++--------+         +--------+           +--------+
+|Flip Dot|         |Stepper |           |  I2C   |
+| Matrix |         | Motor  |           |Devices |
++--------+         +--------+           +--------+
+    |                   |                   |
+    v                   v                   v
+  24V PS            A4988/              DS3231 RTC
+                   DRV8825              SH1107 OLED
+                      |
+                   Hall Sensor
+```
+
+### Component Connections
+
+| Component | Connection | GPIO Pin | Description |
+|-----------|------------|----------|-------------|
+| **Flip Dot Display** | SPI Clock | IO36 (SCK) | Shift register clock |
+| | SPI Data | IO35 (MOSI) | Serial data to shift registers |
+| | Latch | IO37 | Latches data to outputs |
+| | Output Enable | IO18 | Enables flip dot drivers |
+| **Stepper Motor** | Enable | IO6 | Motor driver enable (active low) |
+| | Step | IO12 | Step pulse input |
+| | Direction | IO5 | Rotation direction |
+| | Home Sensor | IO14 | Hall effect sensor input |
+| | Microstep Mode | IO17 | Microstepping configuration |
+| **Relay** | Control | IO11 | 24V power control |
+| **Button A** | Input | IO1 | Animation/reset button |
+| **Button B** | Input | IO38 | +1 Hour button |
+| **Button C** | Input | IO33 | +1 Minute button |
+| **DS3231 RTC** | I2C | SDA/SCL | Address: 0x68 |
+| **SH1107 OLED** | I2C | SDA/SCL | Address: 0x3C |
+| **Onboard LED** | Auto | Internal | Status indicator (auto-detected) |
 
 ### Pin Summary
 ```
 Flip Dot SPI:
   - Clock: IO36 (SCK)
-  - Data:  IO35
+  - Data:  IO35 (MOSI)
   - Latch: IO37
   - OE:    IO18
 
-Stepper Motor:
-  - Enable:    IO6
+Stepper Motor (via A4988/DRV8825):
+  - Enable:    IO6 (active low)
   - Step:      IO12
   - Direction: IO5
-  - Home:      IO14
-  - Mode:      IO17
+  - Home:      IO14 (hall sensor)
+  - Mode:      IO17 (microstepping)
 
-Power:
+Power Control:
   - Relay: IO11
 
-Buttons:
-  - A: IO1
-  - B: IO38
-  - C: IO33
+User Input:
+  - Button A: IO1
+  - Button B: IO38
+  - Button C: IO33
+
+I2C Bus (shared):
+  - DS3231 RTC:   0x68
+  - SH1107 OLED:  0x3C
 ```
+
+### Stepper Motor Configuration
+
+The minute hand uses 800 microsteps per revolution:
+- Base motor: 200 steps/rev (1.8° per step)
+- Microstepping: 4x (configured via MODE pin)
+- Total: 800 microsteps per revolution
+
+### Power Requirements
+
+| Rail | Voltage | Current | Source |
+|------|---------|---------|--------|
+| Logic | 3.3V | ~200mA | USB-C via Feather regulator |
+| Motor | 5-12V | ~500mA | Stepper driver VCC |
+| Flip Dots | 24V | ~2A peak | External 24V PSU via relay |
+
+**Important**: The relay controls 24V power to the flip dots. The code includes precharge timing to allow capacitors to charge before flipping.
 
 ## Setup
 
 ### 1. Install CircuitPython 10.x
 
-Download from: https://circuitpython.org/board/unexpectedmaker_feathers2/
+Download CircuitPython for your board:
+- **Feather S2**: https://circuitpython.org/board/unexpectedmaker_feathers2/
+- **Feather S3**: https://circuitpython.org/board/unexpectedmaker_feathers3/
 
 ### 2. Install Libraries
 
-Copy these libraries to the `lib/` folder on your CIRCUITPY drive:
-- `adafruit_ds3231`
-- `adafruit_register`
-- `adafruit_displayio_sh1107`
-- `adafruit_display_text`
-- `adafruit_display_shapes`
-- `adafruit_dotstar`
-- `adafruit_requests`
-- `adafruit_httpserver`
-- `adafruit_ntp`
+#### Option A: Using circup (Recommended)
+
+Install circup on your computer, then run:
+
+```bash
+pip install circup
+circup install -r requirements-circuitpython.txt
+```
+
+Or use the included installer script:
+
+```bash
+python install_libraries.py
+```
+
+#### Option B: Manual Installation
+
+Download the [Adafruit CircuitPython Bundle](https://circuitpython.org/libraries) and copy these to your CIRCUITPY `lib/` folder:
+
+| Library | Type | Purpose |
+|---------|------|---------|
+| `adafruit_ds3231.mpy` | File | DS3231 RTC driver |
+| `adafruit_displayio_sh1107.mpy` | File | SH1107 OLED driver |
+| `adafruit_display_text/` | Folder | Text rendering |
+| `adafruit_display_shapes/` | Folder | Shape drawing |
+| `adafruit_dotstar.mpy` | File | DotStar LED (S2 only) |
+| `neopixel.mpy` | File | NeoPixel LED (S3 only) |
+| `adafruit_requests.mpy` | File | HTTP requests |
+| `adafruit_httpserver/` | Folder | Web server |
+| `adafruit_register/` | Folder | I2C register abstraction |
+| `adafruit_bus_device/` | Folder | I2C/SPI bus handling |
+| `adafruit_connection_manager.mpy` | File | Network connections |
+
+**Note**: The code auto-detects which board you're using and loads the appropriate LED library.
 
 ### 3. Configure Settings
 
@@ -291,8 +395,9 @@ Daylight Saving Time is automatically calculated for:
 
 ### WiFi Connection Issues
 - Check SSID and password in `settings.toml`
-- Ensure 2.4GHz network (ESP32-S2 doesn't support 5GHz)
+- Ensure 2.4GHz network (ESP32-S2/S3 doesn't support 5GHz)
 - Check serial console for error messages
+- Feather S3 also supports BLE, but this project uses WiFi only
 
 ### Motor Not Homing Correctly
 - Verify hall sensor connection (IO14)

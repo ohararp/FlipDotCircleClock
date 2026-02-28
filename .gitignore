@@ -6,8 +6,8 @@ secrets.py
 __pycache__/
 *.py[cod]
 
-# CircuitPython lib folder (user should install their own)
-lib/
+# CircuitPython lib folder - libraries included in repo
+# lib/
 
 # System files
 .DS_Store
