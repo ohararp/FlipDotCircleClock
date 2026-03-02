@@ -238,17 +238,20 @@ def get_uptime():
     return int(time.monotonic() - start_time)
 
 #%%----------------------------------------------------------------------------
-# NVM Storage for Timezone (index 0 = timezone index + 1, so 0 means uninitialized)
-# NVM persists across reboots without filesystem access
+# NVM Storage Layout (persists across reboots without filesystem access)
+# NVM[0] = magic byte (0xAB) to verify intentional write (guards against garbage)
+# NVM[1] = timezone index into TIMEZONES tuple
+# NVM[2] = home offset (stored as offset + 128, so 0 = uninitialized)
+NVM_MAGIC = 0xAB
 #%%----------------------------------------------------------------------------
 def load_timezone_nvm():
     # Load timezone key from NVM. Returns key string or default.
-    # NVM stores index+1, so 0 means uninitialized (use default)
+    # Only trust NVM if magic byte is present (guards against random garbage)
     try:
-        nvm_value = microcontroller.nvm[0]
-        if nvm_value > 0 and nvm_value <= len(TIMEZONES):
-            tz_index = nvm_value - 1
-            return TIMEZONES[tz_index][0]
+        if microcontroller.nvm[0] == NVM_MAGIC:
+            tz_index = microcontroller.nvm[1]
+            if tz_index < len(TIMEZONES):
+                return TIMEZONES[tz_index][0]
     except Exception as e:
         print("NVM read error:", e)
     return os.getenv("TIMEZONE", "US/Eastern")
@@ -256,11 +259,11 @@ def load_timezone_nvm():
 #%%----------------------------------------------------------------------------
 def save_timezone_nvm(tz_key):
     # Save timezone key to NVM. Returns True on success.
-    # Store index+1 so that 0 means uninitialized
     for i, tz in enumerate(TIMEZONES):
         if tz[0] == tz_key:
             try:
-                microcontroller.nvm[0] = i + 1  # Store index+1
+                microcontroller.nvm[0] = NVM_MAGIC  # Write magic byte
+                microcontroller.nvm[1] = i          # Write timezone index
                 print("Timezone saved to NVM: index", i, tz_key)
                 return True
             except Exception as e:
@@ -270,12 +273,15 @@ def save_timezone_nvm(tz_key):
 
 #%%----------------------------------------------------------------------------
 def load_home_offset_nvm():
-    # Load home offset from NVM byte 1. Returns signed int (-127 to +127).
+    # Load home offset from NVM byte 2. Returns signed int (-127 to +127).
+    # Requires magic byte in NVM[0] to be valid
     # NVM byte 0 means uninitialized = no offset
     # NVM byte 1-255 maps to offset -127 to +127 (stored = offset + 128)
     try:
-        stored = microcontroller.nvm[1]
-        if stored == 0:  # Uninitialized NVM
+        if microcontroller.nvm[0] != NVM_MAGIC:  # NVM not initialized
+            return 0
+        stored = microcontroller.nvm[2]
+        if stored == 0:  # Uninitialized
             return 0
         offset = stored - 128  # Convert from unsigned (1-255) to signed (-127 to +127)
         return offset
@@ -285,13 +291,14 @@ def load_home_offset_nvm():
 
 #%%----------------------------------------------------------------------------
 def save_home_offset_nvm(offset):
-    # Save home offset to NVM byte 1. Offset must be -127 to +127.
+    # Save home offset to NVM byte 2. Offset must be -127 to +127.
     # stored = offset + 128, so offset 0 = stored 128
     try:
         # Clamp to valid range (-127 to +127, since stored 0 = uninitialized)
         offset = max(-127, min(127, offset))
         stored = offset + 128  # Convert from signed to unsigned (1-255)
-        microcontroller.nvm[1] = stored
+        microcontroller.nvm[0] = NVM_MAGIC  # Ensure magic byte is set
+        microcontroller.nvm[2] = stored
         print("Home offset saved to NVM:", offset, "steps")
         return True
     except Exception as e:
