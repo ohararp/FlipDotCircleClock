@@ -238,14 +238,16 @@ def get_uptime():
     return int(time.monotonic() - start_time)
 
 #%%----------------------------------------------------------------------------
-# NVM Storage for Timezone (index 0 = timezone index into TIMEZONES tuple)
+# NVM Storage for Timezone (index 0 = timezone index + 1, so 0 means uninitialized)
 # NVM persists across reboots without filesystem access
 #%%----------------------------------------------------------------------------
 def load_timezone_nvm():
     # Load timezone key from NVM. Returns key string or default.
+    # NVM stores index+1, so 0 means uninitialized (use default)
     try:
-        tz_index = microcontroller.nvm[0]
-        if tz_index < len(TIMEZONES):
+        nvm_value = microcontroller.nvm[0]
+        if nvm_value > 0 and nvm_value <= len(TIMEZONES):
+            tz_index = nvm_value - 1
             return TIMEZONES[tz_index][0]
     except Exception as e:
         print("NVM read error:", e)
@@ -254,10 +256,11 @@ def load_timezone_nvm():
 #%%----------------------------------------------------------------------------
 def save_timezone_nvm(tz_key):
     # Save timezone key to NVM. Returns True on success.
+    # Store index+1 so that 0 means uninitialized
     for i, tz in enumerate(TIMEZONES):
         if tz[0] == tz_key:
             try:
-                microcontroller.nvm[0] = i
+                microcontroller.nvm[0] = i + 1  # Store index+1
                 print("Timezone saved to NVM: index", i, tz_key)
                 return True
             except Exception as e:
