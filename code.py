@@ -720,9 +720,13 @@ def oneStep(data, delay):
     # Perform one motor step, update stepNow, and sample hall sensor.
     setDir(data)
     step.value = True
-    time.sleep(delay)
+    # Brief pulse - toggle quickly
     step.value = False
-    time.sleep(delay)
+    # Simple delay loop - each iteration ~1.7μs on ESP32-S3
+    # Scale delay to loop count (calibrated for ESP32-S3 at 240MHz)
+    loops = int(delay * 580000)  # Calibrated: 580k loops per second
+    for _ in range(loops):
+        pass
 
     global stepNow
     if data == 0:
@@ -874,7 +878,7 @@ def findExactHome(delay=None, apply_offset=True):
     # apply_offset: if True, apply stored NVM offset after finding center
     if delay is None:
         delay = STEP_DELAY
-    print('Finding Exact Home (delay: %d us)' % (delay * 1000000))
+    print('Finding Exact Home')
     en.value = motorEnabled
 
     global stepNow
