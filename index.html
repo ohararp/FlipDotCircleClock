@@ -127,8 +127,19 @@
             <span style="font-size:12px;opacity:0.8;margin-left:8px;">Offset: <span id="calibOffset">0</span></span>
           </div>
           <div class="actions" style="margin-top:10px;">
-            <span style="font-size:12px;opacity:0.8;">Speed (μs):</span>
-            <input type="number" id="stepDelayInput" min="100" max="5000" value="300" style="width:70px;padding:6px 8px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.25);border-radius:8px;color:#fff;font-size:12px;">
+            <span style="font-size:12px;opacity:0.8;">Speed:</span>
+            <select id="stepDelaySelect" style="width:100px;padding:6px 8px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.25);border-radius:8px;color:#fff;font-size:12px;">
+              <option value="100">100 μs</option><option value="125">125 μs</option><option value="150">150 μs</option><option value="175">175 μs</option>
+              <option value="200">200 μs</option><option value="225">225 μs</option><option value="250">250 μs</option><option value="275">275 μs</option>
+              <option value="300" selected>300 μs</option><option value="325">325 μs</option><option value="350">350 μs</option><option value="375">375 μs</option>
+              <option value="400">400 μs</option><option value="425">425 μs</option><option value="450">450 μs</option><option value="475">475 μs</option>
+              <option value="500">500 μs</option><option value="525">525 μs</option><option value="550">550 μs</option><option value="575">575 μs</option>
+              <option value="600">600 μs</option><option value="625">625 μs</option><option value="650">650 μs</option><option value="675">675 μs</option>
+              <option value="700">700 μs</option><option value="725">725 μs</option><option value="750">750 μs</option><option value="775">775 μs</option>
+              <option value="800">800 μs</option><option value="825">825 μs</option><option value="850">850 μs</option><option value="875">875 μs</option>
+              <option value="900">900 μs</option><option value="925">925 μs</option><option value="950">950 μs</option><option value="975">975 μs</option>
+              <option value="1000">1000 μs</option>
+            </select>
             <button id="setSpeedBtn">Set Speed</button>
             <span style="font-size:12px;opacity:0.8;margin-left:8px;">Current: <span id="currentSpeed">300</span> μs</span>
           </div>
@@ -169,7 +180,7 @@
     setText('flipPower',d.flipdot_power?'ON':'OFF');
     setDot('dotWifi',d.wifi_connected);
     if(d.home_offset !== undefined){setText('calibOffset',d.home_offset);}
-    if(d.step_delay_us !== undefined){setText('currentSpeed',d.step_delay_us);document.getElementById('stepDelayInput').value=d.step_delay_us;}
+    if(d.step_delay_us !== undefined){setText('currentSpeed',d.step_delay_us);document.getElementById('stepDelaySelect').value=d.step_delay_us;}
   }
 
   function connectWebSocket(){
@@ -316,7 +327,7 @@
     }).catch(function(){});
   });
   document.getElementById('setSpeedBtn').addEventListener('click',function(){
-    var delay_us=parseInt(document.getElementById('stepDelayInput').value)||300;
+    var delay_us=parseInt(document.getElementById('stepDelaySelect').value)||300;
     fetch('/set_speed',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({delay_us:delay_us})})
       .then(function(r){return r.json();})
       .then(function(d){

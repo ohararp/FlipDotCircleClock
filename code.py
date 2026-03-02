@@ -243,7 +243,7 @@ def get_uptime():
 # NVM[1] = timezone index into TIMEZONES tuple
 # NVM[2] = home offset high byte (16-bit signed, range ±1056, stored as offset + 32768)
 # NVM[3] = home offset low byte
-# NVM[4] = step delay high byte (16-bit, microseconds, 100-5000 range)
+# NVM[4] = step delay high byte (16-bit, microseconds, 100-1000 range)
 # NVM[5] = step delay low byte
 NVM_MAGIC = 0xAB
 DEFAULT_STEP_DELAY_US = 300  # Default 300 microseconds (0.0003 seconds)
@@ -318,7 +318,7 @@ def save_home_offset_nvm(offset):
 #%%----------------------------------------------------------------------------
 def load_step_delay_nvm():
     # Load step delay from NVM bytes 4-5. Returns delay in seconds (float).
-    # Stored as microseconds (100-5000 range). Returns default if not set.
+    # Stored as microseconds (100-1000 range). Returns default if not set.
     try:
         if microcontroller.nvm[0] != NVM_MAGIC:  # NVM not initialized
             return DEFAULT_STEP_DELAY_US / 1000000.0
@@ -328,7 +328,7 @@ def load_step_delay_nvm():
         if delay_us == 0:  # Uninitialized
             return DEFAULT_STEP_DELAY_US / 1000000.0
         # Clamp to valid range
-        delay_us = max(100, min(5000, delay_us))
+        delay_us = max(100, min(1000, delay_us))
         return delay_us / 1000000.0  # Convert to seconds
     except Exception as e:
         print("NVM step delay read error:", e)
@@ -336,10 +336,10 @@ def load_step_delay_nvm():
 
 #%%----------------------------------------------------------------------------
 def save_step_delay_nvm(delay_us):
-    # Save step delay to NVM bytes 4-5. Delay in microseconds (100-5000 range).
+    # Save step delay to NVM bytes 4-5. Delay in microseconds (100-1000 range).
     try:
         # Clamp to valid range
-        delay_us = max(100, min(5000, int(delay_us)))
+        delay_us = max(100, min(1000, int(delay_us)))
         high_byte = (delay_us >> 8) & 0xFF
         low_byte = delay_us & 0xFF
         microcontroller.nvm[0] = NVM_MAGIC  # Ensure magic byte is set
@@ -1791,14 +1791,14 @@ def setupWebServer(pool):
 
     @server.route("/set_speed", POST)
     def set_speed_route(request: Request):
-        # Set step delay in microseconds (100-5000 range)
+        # Set step delay in microseconds (100-1000 range)
         global STEP_DELAY
         try:
             body = request.body.decode("utf-8") if request.body else "{}"
             data = json.loads(body)
             delay_us = int(data.get("delay_us", DEFAULT_STEP_DELAY_US))
             # Clamp to valid range
-            delay_us = max(100, min(5000, delay_us))
+            delay_us = max(100, min(1000, delay_us))
             save_step_delay_nvm(delay_us)
             STEP_DELAY = delay_us / 1000000.0
             log_action("Step delay set to %d us" % delay_us)
