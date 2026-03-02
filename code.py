@@ -683,8 +683,6 @@ def pollServer():
             server.poll()
         except Exception as e:
             print("Server poll error:", e)
-    # Also check for WebSocket messages
-    handleWebSocket()
 
 #%%----------------------------------------------------------------------------
 def getStatusDict():
@@ -1682,18 +1680,20 @@ def setupWebServer(pool):
 
     @server.route("/nudge_cw", POST)
     def nudge_cw_route(request: Request):
-        # Nudge hand 1 step clockwise
+        # Nudge hand clockwise (50 steps = ~1.4 degrees visible movement)
         global calibration_steps
-        oneStep(1, 0.0003)
-        calibration_steps += 1
+        nudge_steps = 50
+        multiStep(1, nudge_steps, 0.0003)
+        calibration_steps += nudge_steps
         return Response(request, body='{"ok":true,"nudged":%d}' % calibration_steps, content_type="application/json")
 
     @server.route("/nudge_ccw", POST)
     def nudge_ccw_route(request: Request):
-        # Nudge hand 1 step counter-clockwise
+        # Nudge hand counter-clockwise (50 steps = ~1.4 degrees visible movement)
         global calibration_steps
-        oneStep(0, 0.0003)
-        calibration_steps -= 1
+        nudge_steps = 50
+        multiStep(0, nudge_steps, 0.0003)
+        calibration_steps -= nudge_steps
         return Response(request, body='{"ok":true,"nudged":%d}' % calibration_steps, content_type="application/json")
 
     @server.route("/set_home", POST)
@@ -1852,7 +1852,9 @@ while True:
     secTest = t.tm_sec
     if secOld != secTest:
         screenUpdate()
-        sendWebSocketStatus()  # Push status to WebSocket client
+        handleWebSocket()  # Check for WebSocket commands
+        if secTest % 5 == 0:  # Send WebSocket status every 5 seconds
+            sendWebSocketStatus()
         secOld = secTest
 
     # Perform Mech Update Every Minute
