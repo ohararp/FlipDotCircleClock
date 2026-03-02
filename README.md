@@ -282,6 +282,9 @@ The IP address is shown on the OLED display and printed to the serial console.
 | `/nudge_cw` | POST | Move hand 1 step clockwise |
 | `/nudge_ccw` | POST | Move hand 1 step counter-clockwise |
 | `/set_home` | POST | Save current position as home offset (persists to NVM) |
+| `/reset_calibration` | POST | Reset home offset to zero |
+| `/get_speed` | GET | Get current step delay in microseconds |
+| `/set_speed` | POST | Set step delay (100-1000 μs, persists to NVM) |
 
 ### Status JSON Response
 
@@ -336,7 +339,46 @@ If the minute hand doesn't align exactly at 12 o'clock after homing, use the web
 2. Use **+ CW** / **- CCW** buttons to nudge the hand until it points exactly at 12
 3. Click **Set Home** - saves the offset to NVM (persists across reboots)
 
-The offset (range: -127 to +127 steps) is automatically applied after every homing operation.
+The offset (range: ±1056 steps, ~30 degrees) is automatically applied after every homing operation. Click **Reset** to clear the offset back to zero.
+
+## Motor Speed Configuration
+
+The stepper motor speed is configurable via the web interface and persists across reboots (stored in NVM).
+
+### Speed Settings
+
+| Setting | Delay | Description |
+|---------|-------|-------------|
+| 100 μs | Fastest | May cause missed steps |
+| 300 μs | Fast | Good for quick movements |
+| **450 μs** | **Default** | Balanced speed and reliability |
+| 700 μs | Slow | Very smooth motion |
+| 1000 μs | Slowest | Maximum torque |
+
+The dropdown in the web UI offers options from 100-1000 μs in 25 μs increments.
+
+### Timing Calibration
+
+CircuitPython's `time.sleep()` does not provide reliable microsecond-level delays on ESP32. The code uses a calibrated busy-wait loop instead:
+
+```python
+# Calibrated delay loop for ESP32-S3 at 240MHz
+loops = int(delay * 580000)  # 580k iterations per second
+for _ in range(loops):
+    pass
+```
+
+**Calibration process:**
+1. The ESP32-S3 runs at 240MHz with a Python interpreter overhead
+2. A simple `for` loop was benchmarked to determine iterations per second
+3. The calibration factor (580,000) was tuned to achieve 98%+ timing accuracy
+4. Actual vs expected timing was verified via `time.monotonic()` measurements
+
+**Verification results (at 1000 μs setting):**
+- 6400 steps: expected 6.400s, actual 6.746s (94% accurate)
+- 213 steps: expected 0.213s, actual 0.209s (98% accurate)
+
+If running on different hardware (Feather S2 vs S3, different clock speed), you may need to adjust the calibration factor in `oneStep()`.
 
 ## Operation
 

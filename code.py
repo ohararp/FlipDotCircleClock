@@ -246,7 +246,7 @@ def get_uptime():
 # NVM[4] = step delay high byte (16-bit, microseconds, 100-1000 range)
 # NVM[5] = step delay low byte
 NVM_MAGIC = 0xAB
-DEFAULT_STEP_DELAY_US = 300  # Default 300 microseconds (0.0003 seconds)
+DEFAULT_STEP_DELAY_US = 450  # Default 450 microseconds (0.00045 seconds)
 #%%----------------------------------------------------------------------------
 def load_timezone_nvm():
     # Load timezone key from NVM. Returns key string or default.
