@@ -1,5 +1,5 @@
 # Settings file with WiFi credentials and API keys
-settings.toml
+# settings.toml  # Tracked in private repo
 secrets.py
 
 # Python cache

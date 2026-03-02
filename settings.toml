@@ -1,0 +1,20 @@
+CIRCUITPY_WIFI_SSID = "OHARARP"
+CIRCUITPY_WIFI_PASSWORD = "AOROmoso040810"
+CIRCUITPY_WEB_API_PASSWORD = "passw0rd"
+CIRCUITPY_WEB_API_PORT = 8080
+
+# Clock web interface port (default: 80)
+CLOCK_WEB_PORT = 80
+
+# NTP Server (default: pool.ntp.org)
+NTP_SERVER = "pool.ntp.org"
+
+# Default timezone (used if config.json doesn't exist)
+# Timezone can be changed via web UI and is stored in config.json
+# Available options:
+#   US/Hawaii, US/Alaska, US/Pacific, US/Mountain, US/Arizona
+#   US/Central, US/Eastern
+#   EU/London, EU/Paris, EU/Berlin, EU/Moscow
+#   AS/Dubai, AS/Mumbai, AS/Singapore, AS/Tokyo
+#   OC/Sydney, OC/Auckland, UTC
+TIMEZONE = "US/Eastern"

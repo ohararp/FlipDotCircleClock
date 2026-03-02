@@ -1,6 +1,8 @@
 #%%----------------------------------------------------------------------------
 # FlipDotCircleClock - CircuitPython Flip Dot Clock with Mechanical Minute Hand
 #
+# Requires: CircuitPython 10.x (tested on 10.0.3)
+#
 # Supported Hardware:
 #   - UnexpectedMaker Feather S2 (ESP32-S2)
 #   - UnexpectedMaker Feather S3 (ESP32-S3)
