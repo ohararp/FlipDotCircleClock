@@ -243,7 +243,10 @@ def get_uptime():
 # NVM[1] = timezone index into TIMEZONES tuple
 # NVM[2] = home offset high byte (16-bit signed, range ±1056, stored as offset + 32768)
 # NVM[3] = home offset low byte
+# NVM[4] = step delay high byte (16-bit, microseconds, 100-5000 range)
+# NVM[5] = step delay low byte
 NVM_MAGIC = 0xAB
+DEFAULT_STEP_DELAY_US = 300  # Default 300 microseconds (0.0003 seconds)
 #%%----------------------------------------------------------------------------
 def load_timezone_nvm():
     # Load timezone key from NVM. Returns key string or default.
@@ -310,6 +313,42 @@ def save_home_offset_nvm(offset):
         return True
     except Exception as e:
         print("NVM home offset write error:", e)
+        return False
+
+#%%----------------------------------------------------------------------------
+def load_step_delay_nvm():
+    # Load step delay from NVM bytes 4-5. Returns delay in seconds (float).
+    # Stored as microseconds (100-5000 range). Returns default if not set.
+    try:
+        if microcontroller.nvm[0] != NVM_MAGIC:  # NVM not initialized
+            return DEFAULT_STEP_DELAY_US / 1000000.0
+        high_byte = microcontroller.nvm[4]
+        low_byte = microcontroller.nvm[5]
+        delay_us = (high_byte << 8) | low_byte
+        if delay_us == 0:  # Uninitialized
+            return DEFAULT_STEP_DELAY_US / 1000000.0
+        # Clamp to valid range
+        delay_us = max(100, min(5000, delay_us))
+        return delay_us / 1000000.0  # Convert to seconds
+    except Exception as e:
+        print("NVM step delay read error:", e)
+    return DEFAULT_STEP_DELAY_US / 1000000.0
+
+#%%----------------------------------------------------------------------------
+def save_step_delay_nvm(delay_us):
+    # Save step delay to NVM bytes 4-5. Delay in microseconds (100-5000 range).
+    try:
+        # Clamp to valid range
+        delay_us = max(100, min(5000, int(delay_us)))
+        high_byte = (delay_us >> 8) & 0xFF
+        low_byte = delay_us & 0xFF
+        microcontroller.nvm[0] = NVM_MAGIC  # Ensure magic byte is set
+        microcontroller.nvm[4] = high_byte
+        microcontroller.nvm[5] = low_byte
+        print("Step delay saved to NVM:", delay_us, "us")
+        return True
+    except Exception as e:
+        print("NVM step delay write error:", e)
         return False
 
 #%%----------------------------------------------------------------------------
@@ -518,8 +557,10 @@ def setMins():
 def setupMotor():
     # Configure stepper driver IO and return motor pin objects.
     ucStatus.text = "Setup Motor"
-    global STEPS
+    global STEPS, STEP_DELAY
     STEPS = 12800  # TMC2209 at 32 microsteps × 400 base steps (0.9° motor) = 12800 steps per revolution
+    STEP_DELAY = load_step_delay_nvm()  # Load configurable delay from NVM
+    print("Step delay loaded:", STEP_DELAY * 1000000, "us")
 
     en = digitalio.DigitalInOut(board.IO6)
     en.direction = digitalio.Direction.OUTPUT
@@ -728,6 +769,7 @@ def getStatusDict():
         "free_memory": gc.mem_free(),
         "timezone": tz,
         "home_offset": load_home_offset_nvm(),
+        "step_delay_us": int(STEP_DELAY * 1000000),
     }
 
 #%%----------------------------------------------------------------------------
@@ -769,7 +811,7 @@ def handleWebSocket():
                     t = rtc.datetime
                     numIn = hour24ToHour12(t.tm_hour)
                     roundTo(numIn)
-                    findExactHome(0.00015)
+                    findExactHome()
                     hrUpdate(forceHour=True)
                     minUpdate()
                     sendWebSocketStatus()
@@ -785,7 +827,7 @@ def handleWebSocket():
                     sendWebSocketStatus()
                 elif cmd == "home":
                     log_action("Home via WebSocket")
-                    findExactHome(0.00015)
+                    findExactHome()
                     time.sleep(2)
                     minUpdate()
                     sendWebSocketStatus()
@@ -825,11 +867,14 @@ def moveHome(delay):
     #en.value = motorDisabled
 
 #%%----------------------------------------------------------------------------
-def findExactHome(delay, apply_offset=True):
+def findExactHome(delay=None, apply_offset=True):
     # Find magnet center using symmetric edge detection.
     # Both edges detected at release point for consistency.
+    # delay: step delay in seconds, defaults to STEP_DELAY
     # apply_offset: if True, apply stored NVM offset after finding center
-    print('Finding Exact Home')
+    if delay is None:
+        delay = STEP_DELAY
+    print('Finding Exact Home (delay: %d us)' % (delay * 1000000))
     en.value = motorEnabled
 
     global stepNow
@@ -931,7 +976,7 @@ def findExactHome(delay, apply_offset=True):
 #%%----------------------------------------------------------------------------
 def hourHome():
     # Re-home on the magnet and print the current OLED time text.
-    findExactHome(0.00004)
+    findExactHome()
     print(timeArea.text)
 
 #%%----------------------------------------------------------------------------
@@ -1010,7 +1055,7 @@ def minUpdate():
     print("%d %d %d (CW)" % (minSteps, stepNow, stepsNeeded))
 
     if stepsNeeded > 0:
-        multiStep(1, stepsNeeded, 0.0003)
+        multiStep(1, stepsNeeded, STEP_DELAY)
 
 def hrUpdate(forceHour=False):
     # Move minute hand and force flipdot blank then hour refresh.
@@ -1043,7 +1088,7 @@ def anim_demo():
     flipsPower(True)
     try:
         # Sweep minute hand full rotation
-        multiStep(1, STEPS, 0.0002)
+        multiStep(1, STEPS, STEP_DELAY)
         # Count through hours 1-12
         for h in range(1, 13):
             setFlips(hourIn(h), 1, managePower=False)
@@ -1054,7 +1099,7 @@ def anim_demo():
     finally:
         extendFlipPowerWindow()
     # Restore time
-    findExactHome(0.00015)
+    findExactHome()
     hrUpdate(forceHour=True)
     minUpdate()
 
@@ -1062,11 +1107,11 @@ def anim_chase():
     # Chase pattern: flipdots ripple, hand follows
     flipsPower(True)
     try:
-        findExactHome(0.00015)  # Start at 12
+        findExactHome()  # Start at 12
         steps_per_hour = STEPS // 12
         for h in range(1, 13):
             # Move hand to hour position
-            multiStep(1, steps_per_hour, 0.0002)
+            multiStep(1, steps_per_hour, STEP_DELAY)
             # Light up matching hour
             setFlips(hourIn(h), 1, managePower=False)
             time.sleep(0.15)
@@ -1076,7 +1121,7 @@ def anim_chase():
     finally:
         extendFlipPowerWindow()
     # Restore time
-    findExactHome(0.00015)
+    findExactHome()
     hrUpdate(forceHour=True)
     minUpdate()
 
@@ -1087,12 +1132,12 @@ def anim_chaos():
         for _ in range(20):
             setFlips(hourIn(r.randint(0, 12)), 1, managePower=False)
             # Oscillate hand randomly
-            multiStep(r.choice([0, 1]), r.randint(20, 100), 0.00015)
+            multiStep(r.choice([0, 1]), r.randint(20, 100), STEP_DELAY)
             time.sleep(0.08)
     finally:
         extendFlipPowerWindow()
     # Restore time
-    findExactHome(0.00015)
+    findExactHome()
     hrUpdate(forceHour=True)
     minUpdate()
 
@@ -1101,18 +1146,18 @@ def anim_sync():
     flipsPower(True)
     try:
         setFlips([0, 0, 0, 0], 1, managePower=False)  # Start blank
-        findExactHome(0.00015)  # Start at 12
+        findExactHome()  # Start at 12
         steps_per_hour = STEPS // 12
         for h in range(1, 13):
             # Move hand to hour position
-            multiStep(1, steps_per_hour, 0.00025)
+            multiStep(1, steps_per_hour, STEP_DELAY)
             # Light up matching hour
             setFlips(hourIn(h), 1, managePower=False)
             time.sleep(0.25)
     finally:
         extendFlipPowerWindow()
     # Restore time
-    findExactHome(0.00015)
+    findExactHome()
     hrUpdate(forceHour=True)
     minUpdate()
 
@@ -1530,6 +1575,7 @@ def setupWebServer(pool):
             "free_memory": gc.mem_free(),
             "last_wifi_sync": last_wifi_sync_time,
             "home_offset": load_home_offset_nvm(),
+            "step_delay_us": int(STEP_DELAY * 1000000),
         }
         return Response(request, body=json.dumps(status), content_type="application/json")
 
@@ -1544,7 +1590,7 @@ def setupWebServer(pool):
         t = rtc.datetime
         numIn = hour24ToHour12(t.tm_hour)
         roundTo(numIn)                        # Animate flipdots to current hour
-        findExactHome(0.00015)               # Re-home minute hand
+        findExactHome()               # Re-home minute hand
         hrUpdate(forceHour=True)              # Force hour refresh
         minUpdate()                           # Sync minute hand
         return Response(request, body='{"ok":true}', content_type="application/json")
@@ -1685,7 +1731,7 @@ def setupWebServer(pool):
     def home_route(request: Request):
         # Home minute hand, pause at 12 o'clock, then return to current time
         log_action("Home motor triggered via web")
-        findExactHome(0.00015)  # Use current algorithm (swap to V2 after testing)
+        findExactHome()  # Use current algorithm (swap to V2 after testing)
         time.sleep(2)  # Pause at 12 o'clock for verification
         minUpdate()  # Return to current time
         return Response(request, body='{"ok":true}', content_type="application/json")
@@ -1696,7 +1742,7 @@ def setupWebServer(pool):
         global calibration_steps
         calibration_steps = 0  # Reset nudge counter
         log_action("Calibration started")
-        findExactHome(0.00015, apply_offset=False)  # Go to raw center
+        findExactHome(apply_offset=False)  # Go to raw center
         # Don't call minUpdate - stay at 12 o'clock for adjustment
         return Response(request, body='{"ok":true,"offset":0,"nudged":0}', content_type="application/json")
 
@@ -1705,7 +1751,7 @@ def setupWebServer(pool):
         # Nudge hand clockwise (50 steps = ~1.4 degrees visible movement)
         global calibration_steps
         nudge_steps = 50
-        multiStep(1, nudge_steps, 0.0003)
+        multiStep(1, nudge_steps, STEP_DELAY)
         calibration_steps += nudge_steps
         return Response(request, body='{"ok":true,"nudged":%d}' % calibration_steps, content_type="application/json")
 
@@ -1714,7 +1760,7 @@ def setupWebServer(pool):
         # Nudge hand counter-clockwise (50 steps = ~1.4 degrees visible movement)
         global calibration_steps
         nudge_steps = 50
-        multiStep(0, nudge_steps, 0.0003)
+        multiStep(0, nudge_steps, STEP_DELAY)
         calibration_steps -= nudge_steps
         return Response(request, body='{"ok":true,"nudged":%d}' % calibration_steps, content_type="application/json")
 
@@ -1736,6 +1782,30 @@ def setupWebServer(pool):
         calibration_steps = 0
         log_action("Home offset reset to 0")
         return Response(request, body='{"ok":true,"offset":0}', content_type="application/json")
+
+    @server.route("/get_speed")
+    def get_speed_route(request: Request):
+        # Return current step delay in microseconds
+        delay_us = int(STEP_DELAY * 1000000)
+        return Response(request, body='{"delay_us":%d}' % delay_us, content_type="application/json")
+
+    @server.route("/set_speed", POST)
+    def set_speed_route(request: Request):
+        # Set step delay in microseconds (100-5000 range)
+        global STEP_DELAY
+        try:
+            body = request.body.decode("utf-8") if request.body else "{}"
+            data = json.loads(body)
+            delay_us = int(data.get("delay_us", DEFAULT_STEP_DELAY_US))
+            # Clamp to valid range
+            delay_us = max(100, min(5000, delay_us))
+            save_step_delay_nvm(delay_us)
+            STEP_DELAY = delay_us / 1000000.0
+            log_action("Step delay set to %d us" % delay_us)
+            return Response(request, body='{"ok":true,"delay_us":%d}' % delay_us, content_type="application/json")
+        except Exception as e:
+            print("set_speed error:", e)
+            return Response(request, body='{"ok":false,"error":"Parse error"}', content_type="application/json")
 
     @server.route("/ws")
     def websocket_route(request: Request):
@@ -1799,9 +1869,9 @@ time.sleep(1.0)
 ucStatus.text = "Magnet Offset"
 time.sleep(1.0)
 for i in range(2):
-    multiStep(1,r.randint(125,STEPS),0.00008)
+    multiStep(1, r.randint(125, STEPS), STEP_DELAY)
     time.sleep(0.25)
-    magOffset = findExactHome(0.00015)
+    magOffset = findExactHome()
 
 # Show the Current RTC Time
 ucStatus.text = "Show Time"
@@ -1911,7 +1981,7 @@ while True:
         numIn = hour24ToHour12(t.tm_hour)
         roundTo(numIn)        # Animate flipdots to current hour
 
-        magOffset = findExactHome(0.00015)  # Re-home minute hand
+        magOffset = findExactHome()  # Re-home minute hand
         hrUpdate(forceHour=True)              # Force hour refresh
         minUpdate()                           # Sync minute hand
 

@@ -126,6 +126,12 @@
             <button id="resetCalibBtn">Reset</button>
             <span style="font-size:12px;opacity:0.8;margin-left:8px;">Offset: <span id="calibOffset">0</span></span>
           </div>
+          <div class="actions" style="margin-top:10px;">
+            <span style="font-size:12px;opacity:0.8;">Speed (μs):</span>
+            <input type="number" id="stepDelayInput" min="100" max="5000" value="300" style="width:70px;padding:6px 8px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.25);border-radius:8px;color:#fff;font-size:12px;">
+            <button id="setSpeedBtn">Set Speed</button>
+            <span style="font-size:12px;opacity:0.8;margin-left:8px;">Current: <span id="currentSpeed">300</span> μs</span>
+          </div>
         </div>
       </div>
       <div class="logwrap">
@@ -163,6 +169,7 @@
     setText('flipPower',d.flipdot_power?'ON':'OFF');
     setDot('dotWifi',d.wifi_connected);
     if(d.home_offset !== undefined){setText('calibOffset',d.home_offset);}
+    if(d.step_delay_us !== undefined){setText('currentSpeed',d.step_delay_us);document.getElementById('stepDelayInput').value=d.step_delay_us;}
   }
 
   function connectWebSocket(){
@@ -307,6 +314,15 @@
       if(d.ok){document.getElementById('calibOffset').textContent='0 (reset)';}
       setTimeout(function(){fetchLog();},500);
     }).catch(function(){});
+  });
+  document.getElementById('setSpeedBtn').addEventListener('click',function(){
+    var delay_us=parseInt(document.getElementById('stepDelayInput').value)||300;
+    fetch('/set_speed',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({delay_us:delay_us})})
+      .then(function(r){return r.json();})
+      .then(function(d){
+        if(d.ok){document.getElementById('currentSpeed').textContent=d.delay_us+' (saved)';}
+        setTimeout(function(){fetchLog();},500);
+      }).catch(function(){});
   });
 
   // Initialize
