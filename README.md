@@ -176,46 +176,25 @@ Download CircuitPython for your board:
 - **Feather S2**: https://circuitpython.org/board/unexpectedmaker_feathers2/
 - **Feather S3**: https://circuitpython.org/board/unexpectedmaker_feathers3/
 
-### 2. Install Libraries
+### 2. Copy Files to Device
 
-#### Option A: Using circup (Recommended)
+Copy the following files/folders from this repository to your CIRCUITPY drive:
 
-Install circup on your computer, then run:
+| Source | Destination | Purpose |
+|--------|-------------|---------|
+| `code.py` | `CIRCUITPY/code.py` | Main application |
+| `index.html` | `CIRCUITPY/index.html` | Web dashboard |
+| `adafruit_ntp.py` | `CIRCUITPY/adafruit_ntp.py` | NTP client |
+| `lib/` | `CIRCUITPY/lib/` | Required libraries |
+| `settings.toml` | `CIRCUITPY/settings.toml` | Configuration (edit first) |
 
-```bash
-pip install circup
-circup install -r requirements-circuitpython.txt
-```
+The `lib/` folder includes all required CircuitPython libraries pre-compiled (.mpy format).
 
-Or use the included installer script:
-
-```bash
-python install_libraries.py
-```
-
-#### Option B: Manual Installation
-
-Download the [Adafruit CircuitPython Bundle](https://circuitpython.org/libraries) and copy these to your CIRCUITPY `lib/` folder:
-
-| Library | Type | Purpose |
-|---------|------|---------|
-| `adafruit_ds3231.mpy` | File | DS3231 RTC driver |
-| `adafruit_displayio_sh1107.mpy` | File | SH1107 OLED driver |
-| `adafruit_display_text/` | Folder | Text rendering |
-| `adafruit_display_shapes/` | Folder | Shape drawing |
-| `adafruit_dotstar.mpy` | File | DotStar LED (S2 only) |
-| `neopixel.mpy` | File | NeoPixel LED (S3 only) |
-| `adafruit_requests.mpy` | File | HTTP requests |
-| `adafruit_httpserver/` | Folder | Web server |
-| `adafruit_register/` | Folder | I2C register abstraction |
-| `adafruit_bus_device/` | Folder | I2C/SPI bus handling |
-| `adafruit_connection_manager.mpy` | File | Network connections |
-
-**Note**: The code auto-detects which board you're using and loads the appropriate LED library.
+**Note**: The code auto-detects which board you're using (Feather S2 or S3) and loads the appropriate LED library.
 
 ### 3. Configure Settings
 
-Copy `settings.toml.example` to `settings.toml` and fill in your details:
+Edit `settings.toml` with your WiFi credentials:
 
 ```toml
 CIRCUITPY_WIFI_SSID = "YOUR_WIFI_SSID"
@@ -238,13 +217,6 @@ TIMEZONE = "US/Eastern"
 - `CIRCUITPY_WEB_API_PORT` - CircuitPython code editor (default: 8080)
 
 **Code Editor Authentication:** Username is empty (leave blank), password is `CIRCUITPY_WEB_API_PASSWORD`
-
-### 4. Deploy
-
-Copy the following files to your CIRCUITPY drive:
-- `code.py` - Main application
-- `settings.toml` - WiFi and NTP configuration
-- `index.html` - Web dashboard
 
 ## Configuration
 
