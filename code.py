@@ -9,7 +9,8 @@
 #
 # Required External Hardware:
 #   - Flip Dot Display (4-column matrix) via SPI
-#   - Stepper Motor with Driver (A4988/DRV8825) for minute hand
+#   - Stepper Motor: MT-1701HSM140AE (0.9°/400 steps) or similar
+#   - Stepper Driver: TMC2209 (recommended) or A4988/DRV8825
 #   - Hall Effect Sensor for home position detection
 #   - DS3231 RTC Module (I2C)
 #   - SH1107 128x64 OLED Display (I2C)
@@ -20,7 +21,12 @@
 #
 # Pin Configuration (same for S2 and S3):
 #   SPI (Flip Dots): SCK=IO36, MOSI=IO35, LATCH=IO37, OE=IO18
-#   Stepper: EN=IO6, STEP=IO12, DIR=IO5, HOME=IO14, MODE=IO17
+#   Stepper: EN=IO6, STEP=IO12, DIR=IO5, HOME=IO14, MS1=IO17
+#
+# TMC2209 Configuration:
+#   - MS1 (IO17) = HIGH, MS2 floating = 32 microsteps
+#   - With 0.9° motor (400 steps): 400 × 32 = 12800 steps/rev
+#   - StealthChop provides silent operation
 #   Buttons: A=IO1, B=IO38, C=IO33
 #   Relay: IO11
 #   I2C: SDA/SCL (default pins)
@@ -495,7 +501,7 @@ def setupMotor():
     # Configure stepper driver IO and return motor pin objects.
     ucStatus.text = "Setup Motor"
     global STEPS
-    STEPS = 800  # (2 usteps * 400 = 800 steps per revolution)
+    STEPS = 12800  # TMC2209 at 32 microsteps × 400 base steps (0.9° motor) = 12800 steps per revolution
 
     en = digitalio.DigitalInOut(board.IO6)
     en.direction = digitalio.Direction.OUTPUT
@@ -774,7 +780,7 @@ def findExactHome(delay):
 #%%----------------------------------------------------------------------------
 def hourHome():
     # Re-home on the magnet and print the current OLED time text.
-    findExactHome(0.000525)
+    findExactHome(0.00004)
     print(timeArea.text)
 
 #%%----------------------------------------------------------------------------
@@ -853,7 +859,7 @@ def minUpdate():
     print("%d %d %d (CW)" % (minSteps, stepNow, stepsNeeded))
 
     if stepsNeeded > 0:
-        multiStep(1, stepsNeeded, 0.005125)
+        multiStep(1, stepsNeeded, 0.0003)
 
 def hrUpdate(forceHour=False):
     # Move minute hand and force flipdot blank then hour refresh.
@@ -886,7 +892,7 @@ def anim_demo():
     flipsPower(True)
     try:
         # Sweep minute hand full rotation
-        multiStep(1, STEPS, 0.003)
+        multiStep(1, STEPS, 0.0002)
         # Count through hours 1-12
         for h in range(1, 13):
             setFlips(hourIn(h), 1, managePower=False)
@@ -897,7 +903,7 @@ def anim_demo():
     finally:
         extendFlipPowerWindow()
     # Restore time
-    findExactHome(0.002125)
+    findExactHome(0.00015)
     hrUpdate(forceHour=True)
     minUpdate()
 
@@ -905,11 +911,11 @@ def anim_chase():
     # Chase pattern: flipdots ripple, hand follows
     flipsPower(True)
     try:
-        findExactHome(0.002125)  # Start at 12
+        findExactHome(0.00015)  # Start at 12
         steps_per_hour = STEPS // 12
         for h in range(1, 13):
             # Move hand to hour position
-            multiStep(1, steps_per_hour, 0.003)
+            multiStep(1, steps_per_hour, 0.0002)
             # Light up matching hour
             setFlips(hourIn(h), 1, managePower=False)
             time.sleep(0.15)
@@ -919,7 +925,7 @@ def anim_chase():
     finally:
         extendFlipPowerWindow()
     # Restore time
-    findExactHome(0.002125)
+    findExactHome(0.00015)
     hrUpdate(forceHour=True)
     minUpdate()
 
@@ -930,12 +936,12 @@ def anim_chaos():
         for _ in range(20):
             setFlips(hourIn(r.randint(0, 12)), 1, managePower=False)
             # Oscillate hand randomly
-            multiStep(r.choice([0, 1]), r.randint(20, 100), 0.002)
+            multiStep(r.choice([0, 1]), r.randint(20, 100), 0.00015)
             time.sleep(0.08)
     finally:
         extendFlipPowerWindow()
     # Restore time
-    findExactHome(0.002125)
+    findExactHome(0.00015)
     hrUpdate(forceHour=True)
     minUpdate()
 
@@ -944,18 +950,18 @@ def anim_sync():
     flipsPower(True)
     try:
         setFlips([0, 0, 0, 0], 1, managePower=False)  # Start blank
-        findExactHome(0.002125)  # Start at 12
+        findExactHome(0.00015)  # Start at 12
         steps_per_hour = STEPS // 12
         for h in range(1, 13):
             # Move hand to hour position
-            multiStep(1, steps_per_hour, 0.004)
+            multiStep(1, steps_per_hour, 0.00025)
             # Light up matching hour
             setFlips(hourIn(h), 1, managePower=False)
             time.sleep(0.25)
     finally:
         extendFlipPowerWindow()
     # Restore time
-    findExactHome(0.002125)
+    findExactHome(0.00015)
     hrUpdate(forceHour=True)
     minUpdate()
 
@@ -1386,7 +1392,7 @@ def setupWebServer(pool):
         t = rtc.datetime
         numIn = hour24ToHour12(t.tm_hour)
         roundTo(numIn)                        # Animate flipdots to current hour
-        findExactHome(0.002125)               # Re-home minute hand
+        findExactHome(0.00015)               # Re-home minute hand
         hrUpdate(forceHour=True)              # Force hour refresh
         minUpdate()                           # Sync minute hand
         return Response(request, body='{"ok":true}', content_type="application/json")
@@ -1527,7 +1533,7 @@ def setupWebServer(pool):
     def home_route(request: Request):
         # Home minute hand, pause at 12 o'clock, then return to current time
         log_action("Home motor triggered via web")
-        findExactHome(0.002125)  # Use current algorithm (swap to V2 after testing)
+        findExactHome(0.00015)  # Use current algorithm (swap to V2 after testing)
         time.sleep(2)  # Pause at 12 o'clock for verification
         minUpdate()  # Return to current time
         return Response(request, body='{"ok":true}', content_type="application/json")
@@ -1538,7 +1544,7 @@ def setupWebServer(pool):
         global calibration_steps
         calibration_steps = 0  # Reset nudge counter
         log_action("Calibration started")
-        findExactHome(0.002125)
+        findExactHome(0.00015)
         # Don't call minUpdate - stay at 12 o'clock for adjustment
         offset = load_home_offset_nvm()
         return Response(request, body='{"ok":true,"offset":%d,"nudged":0}' % offset, content_type="application/json")
@@ -1547,7 +1553,7 @@ def setupWebServer(pool):
     def nudge_cw_route(request: Request):
         # Nudge hand 1 step clockwise
         global calibration_steps
-        oneStep(1, 0.005)
+        oneStep(1, 0.0003)
         calibration_steps += 1
         return Response(request, body='{"ok":true,"nudged":%d}' % calibration_steps, content_type="application/json")
 
@@ -1555,7 +1561,7 @@ def setupWebServer(pool):
     def nudge_ccw_route(request: Request):
         # Nudge hand 1 step counter-clockwise
         global calibration_steps
-        oneStep(0, 0.005)
+        oneStep(0, 0.0003)
         calibration_steps -= 1
         return Response(request, body='{"ok":true,"nudged":%d}' % calibration_steps, content_type="application/json")
 
@@ -1617,9 +1623,9 @@ time.sleep(1.0)
 ucStatus.text = "Magnet Offset"
 time.sleep(1.0)
 for i in range(2):
-    multiStep(1,r.randint(125,STEPS),0.001)
+    multiStep(1,r.randint(125,STEPS),0.00008)
     time.sleep(0.25)
-    magOffset = findExactHome(0.002125)
+    magOffset = findExactHome(0.00015)
 
 # Show the Current RTC Time
 ucStatus.text = "Show Time"
@@ -1703,7 +1709,7 @@ while True:
         numIn = hour24ToHour12(t.tm_hour)
         roundTo(numIn)        # Animate flipdots to current hour
 
-        magOffset = findExactHome(0.002125)  # Re-home minute hand
+        magOffset = findExactHome(0.00015)  # Re-home minute hand
         hrUpdate(forceHour=True)              # Force hour refresh
         minUpdate()                           # Sync minute hand
 

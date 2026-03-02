@@ -35,8 +35,8 @@ Both boards use the same pin layout - the code auto-detects which board is runni
 | Component | Specifications | Purpose | Approx. Cost |
 |-----------|---------------|---------|--------------|
 | **Flip Dot Display** | 4-column flip dot matrix, 24V | Hour display (1-12) | $50-150 |
-| **Stepper Motor** | NEMA 17 or similar, 1.8°/step | Minute hand drive | $10-20 |
-| **Stepper Driver** | A4988 or DRV8825 | Motor control with microstepping | $2-10 |
+| **Stepper Motor** | MT-1701HSM140AE or similar, 0.9°/step (400 steps/rev) | Minute hand drive | $10-20 |
+| **Stepper Driver** | TMC2209 (recommended) or A4988/DRV8825 | Motor control with microstepping | $2-10 |
 | **DS3231 RTC Module** | I2C, with CR2032 battery | Battery-backed timekeeping | $3-10 |
 | **SH1107 OLED Display** | 128x64, I2C @ 0x3C | Status display | $8-15 |
 | **5V Relay Module** | Single channel, 24V/10A rated | Flip dot power switching | $2-5 |
@@ -63,8 +63,8 @@ Both boards use the same pin layout - the code auto-detects which board is runni
 +--------+         +--------+           +--------+
     |                   |                   |
     v                   v                   v
-  24V PS            A4988/              DS3231 RTC
-                   DRV8825              SH1107 OLED
+  24V PS            TMC2209             DS3231 RTC
+                   (or A4988)           SH1107 OLED
                       |
                    Hall Sensor
 ```
@@ -81,7 +81,7 @@ Both boards use the same pin layout - the code auto-detects which board is runni
 | | Step | IO12 | Step pulse input |
 | | Direction | IO5 | Rotation direction |
 | | Home Sensor | IO14 | Hall effect sensor input |
-| | Microstep Mode | IO17 | Microstepping configuration |
+| | MS1 (Microstep) | IO17 | Microstepping configuration (HIGH for TMC2209) |
 | **Relay** | Control | IO11 | 24V power control |
 | **Button A** | Input | IO1 | Animation/reset button |
 | **Button B** | Input | IO38 | +1 Hour button |
@@ -120,10 +120,43 @@ I2C Bus (shared):
 
 ### Stepper Motor Configuration
 
-The minute hand uses 800 microsteps per revolution:
-- Base motor: 200 steps/rev (1.8° per step)
-- Microstepping: 4x (configured via MODE pin)
-- Total: 800 microsteps per revolution
+The minute hand uses a high-resolution stepper with TMC2209 driver:
+- **Motor**: MT-1701HSM140AE or similar 0.9° stepper (400 steps/rev)
+- **Driver**: TMC2209 in standalone mode
+- **Microstepping**: 32x (MS1=HIGH via IO17, MS2=floating)
+- **Total**: 400 × 32 = **12800 microsteps per revolution**
+
+#### TMC2209 Wiring
+
+| TMC2209 Pin | Connection | Notes |
+|-------------|------------|-------|
+| EN | IO6 | Enable (active low) |
+| STEP | IO12 | Step pulse input |
+| DIR | IO5 | Direction control |
+| MS1 | IO17 | HIGH for 32 microsteps |
+| MS2 | Float | Leave unconnected (internal pull-down) |
+| VIO | 3.3V | Logic voltage |
+| VM | 12V | Motor voltage |
+| GND | GND | Common ground |
+
+#### TMC2209 Microstepping Table
+
+| MS2 | MS1 | Microsteps | Steps/Rev (0.9° motor) |
+|-----|-----|------------|------------------------|
+| LOW | LOW | 8 | 3200 |
+| LOW | HIGH | 32 | 12800 |
+| HIGH | LOW | 64 | 25600 |
+| HIGH | HIGH | 16 | 6400 |
+
+**Note**: TMC2209's StealthChop mode provides silent operation. The driver automatically interpolates to 256 microsteps internally for smooth motion.
+
+#### Alternative: A4988/DRV8825
+
+If using A4988 or DRV8825 instead of TMC2209, adjust `STEPS` in code.py:
+```python
+STEPS = 800   # A4988 at 2 microsteps × 400 base steps
+STEPS = 3200  # A4988 at 8 microsteps × 400 base steps
+```
 
 ### Power Requirements
 
