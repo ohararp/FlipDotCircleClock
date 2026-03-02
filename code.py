@@ -65,7 +65,7 @@ import json
 import microcontroller
 
 # Web Server Libraries
-from adafruit_httpserver import Server, Request, Response, POST
+from adafruit_httpserver import Server, Request, Response, POST, Websocket
 
 # LED Libraries - auto-detect board type
 # Feather S2 uses DotStar (APA102), Feather S3 uses NeoPixel (WS2812)
@@ -146,6 +146,7 @@ hrOld  = 255
 
 # Web Server Variables
 server = None
+ws_client = None  # Active WebSocket connection
 action_log = []
 LOG_MAX = 50
 start_time = 0
@@ -674,11 +675,125 @@ def oneStep(data, delay):
     hallTest()
 
 #%%----------------------------------------------------------------------------
+def pollServer():
+    # Poll web server if available to maintain responsiveness during long operations.
+    global server
+    if server:
+        try:
+            server.poll()
+        except Exception as e:
+            print("Server poll error:", e)
+    # Also check for WebSocket messages
+    handleWebSocket()
+
+#%%----------------------------------------------------------------------------
+def getStatusDict():
+    # Build status dictionary for WebSocket/JSON responses.
+    try:
+        t = rtc.datetime
+        time_str = "{:02}:{:02}:{:02}".format(t.tm_hour, t.tm_min, t.tm_sec)
+        hr12 = hour24ToHour12(t.tm_hour)
+        minute = t.tm_min
+    except:
+        time_str = "??:??:??"
+        hr12 = 0
+        minute = 0
+
+    tz = load_timezone_nvm()
+    return {
+        "time": time_str,
+        "hour_12": hr12,
+        "minute": minute,
+        "wifi_connected": wifi.radio.connected,
+        "ip_address": str(wifi.radio.ipv4_address) if wifi.radio.connected else "None",
+        "motor_position": stepNow,
+        "motor_steps_total": STEPS,
+        "flipdot_power": flipPwrIsOn,
+        "uptime_s": get_uptime(),
+        "free_memory": gc.mem_free(),
+        "timezone": tz,
+    }
+
+#%%----------------------------------------------------------------------------
+def sendWebSocketStatus():
+    # Send current status to WebSocket client if connected.
+    global ws_client
+    if ws_client:
+        try:
+            status = getStatusDict()
+            ws_client.send_message(json.dumps({"type": "status", "data": status}))
+        except Exception as e:
+            print("WebSocket send error:", e)
+            try:
+                ws_client.close()
+            except:
+                pass
+            ws_client = None
+
+#%%----------------------------------------------------------------------------
+def handleWebSocket():
+    # Handle incoming WebSocket messages (commands from client).
+    global ws_client
+    if not ws_client:
+        return
+
+    try:
+        msg = ws_client.receive(fail_silently=True)
+        if msg:
+            print("WebSocket received:", msg)
+            try:
+                data = json.loads(msg)
+                cmd = data.get("cmd", "")
+
+                if cmd == "status":
+                    sendWebSocketStatus()
+                elif cmd == "wipe":
+                    log_action("Wipe via WebSocket")
+                    blankDisplay()
+                    t = rtc.datetime
+                    numIn = hour24ToHour12(t.tm_hour)
+                    roundTo(numIn)
+                    findExactHome(0.00015)
+                    hrUpdate(forceHour=True)
+                    minUpdate()
+                    sendWebSocketStatus()
+                elif cmd == "set_hour":
+                    log_action("+1 hour via WebSocket")
+                    setHrs()
+                    hrUpdate(forceHour=True)
+                    sendWebSocketStatus()
+                elif cmd == "set_min":
+                    log_action("+1 minute via WebSocket")
+                    setMins()
+                    minUpdate()
+                    sendWebSocketStatus()
+                elif cmd == "home":
+                    log_action("Home via WebSocket")
+                    findExactHome(0.00015)
+                    time.sleep(2)
+                    minUpdate()
+                    sendWebSocketStatus()
+                elif cmd == "ping":
+                    ws_client.send_message(json.dumps({"type": "pong"}))
+            except Exception as e:
+                print("WebSocket command error:", e)
+    except Exception as e:
+        print("WebSocket receive error:", e)
+        try:
+            ws_client.close()
+        except:
+            pass
+        ws_client = None
+
+#%%----------------------------------------------------------------------------
 def multiStep(data, steps, delay):
     # Step motor multiple times with enable control.
     en.value = motorEnabled
-    for _ in range(steps):
+    poll_interval = 100  # Poll server every N steps
+    for i in range(steps):
         oneStep(data, delay)
+        if i % poll_interval == 0:
+            pollServer()
     #en.value = motorDisabled
 
 #%%----------------------------------------------------------------------------
@@ -705,25 +820,41 @@ def findExactHome(delay):
 
     # Step 1: Move forward until hall triggers (enter magnet zone)
     print('Step 1: Finding magnet zone')
+    step_count = 0
     while not hallStable(False):
         oneStep(1, delay)
+        step_count += 1
+        if step_count % 100 == 0:
+            pollServer()
 
     # Step 2: Reverse until hall releases (precise edge A)
     print('Step 2: Finding edge A (release point)')
+    step_count = 0
     while not hallStable(True):
         oneStep(0, delay)
+        step_count += 1
+        if step_count % 100 == 0:
+            pollServer()
     edge_a = stepNow
     print('Edge A at step: %d' % edge_a)
 
     # Step 3: Continue reversing until hall triggers (other side of magnet)
     print('Step 3: Passing through to other side')
+    step_count = 0
     while not hallStable(False):
         oneStep(0, delay)
+        step_count += 1
+        if step_count % 100 == 0:
+            pollServer()
 
     # Step 4: Reverse again (forward) until hall releases (precise edge B)
     print('Step 4: Finding edge B (release point)')
+    step_count = 0
     while not hallStable(True):
         oneStep(1, delay)
+        step_count += 1
+        if step_count % 100 == 0:
+            pollServer()
     edge_b = stepNow
     print('Edge B at step: %d' % edge_b)
 
@@ -1576,6 +1707,21 @@ def setupWebServer(pool):
         calibration_steps = 0
         return Response(request, body='{"ok":true,"offset":%d}' % new_offset, content_type="application/json")
 
+    @server.route("/ws")
+    def websocket_route(request: Request):
+        # WebSocket connection for real-time updates
+        global ws_client
+        # Close existing connection if any
+        if ws_client:
+            try:
+                ws_client.close()
+            except:
+                pass
+        ws_client = Websocket(request)
+        log_action("WebSocket client connected")
+        print("WebSocket client connected")
+        return ws_client
+
     return server
 
 #%%----------------------------------------------------------------------------
@@ -1669,6 +1815,9 @@ if not wifi_status["wifiError"]:
 #%%----------------------------------------------------------------------------
 print("Starting Main Loop")
 
+last_wifi_check = time.monotonic()
+wifi_check_interval = 30  # Check WiFi every 30 seconds
+
 while True:
     # Poll web server for incoming requests
     if server:
@@ -1677,12 +1826,33 @@ while True:
         except Exception as e:
             print("Server poll error:", e)
 
+    # Check WiFi connection periodically and reconnect if needed
+    if time.monotonic() - last_wifi_check > wifi_check_interval:
+        last_wifi_check = time.monotonic()
+        if not wifi.radio.connected:
+            print("WiFi disconnected, attempting reconnect...")
+            wifiCircle.fill = None
+            wifiStatus.text = "Reconnecting"
+            try:
+                ssid = os.getenv("CIRCUITPY_WIFI_SSID")
+                password = os.getenv("CIRCUITPY_WIFI_PASSWORD")
+                wifi.radio.connect(ssid, password)
+                print("WiFi reconnected:", wifi.radio.ipv4_address)
+                wifiCircle.fill = 0xFFFFFF
+                wifiStatus.text = ssid
+                wifiAddress.text = str(wifi.radio.ipv4_address)
+                log_action("WiFi reconnected")
+            except Exception as e:
+                print("WiFi reconnect failed:", e)
+                wifiStatus.text = "WiFi Error"
+
     t = rtc.datetime
 
     # Perform Screen Update Every Second
     secTest = t.tm_sec
     if secOld != secTest:
         screenUpdate()
+        sendWebSocketStatus()  # Push status to WebSocket client
         secOld = secTest
 
     # Perform Mech Update Every Minute
@@ -1727,12 +1897,9 @@ while True:
 
     else:
         serviceFlipPowerWindow()  # Handle delayed flipdot power-off
-        time.sleep(0.1)           # Idle delay to limit loop rate
+        time.sleep(0.01)          # Reduced idle delay for better server responsiveness
 
     if didManualUpdate:
         syncOldTrackers()     # Prevent main loop from re-triggering updates
-
-
     else:
         serviceFlipPowerWindow()
-        time.sleep(0.1)

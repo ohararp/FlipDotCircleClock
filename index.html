@@ -139,24 +139,80 @@
   </div>
 <script>
 (function(){
+  var ws = null;
+  var wsReconnectTimer = null;
+  var wsConnected = false;
+
   function setText(id,val){var el=document.getElementById(id);if(!el)return;if(val===null||val===undefined||val==="")val="--";el.textContent=String(val);}
   function setDot(id,ok){var el=document.getElementById(id);if(!el)return;el.className="dot "+(ok?"ok":"bad");}
+
+  function updateStatus(d){
+    setText('currentTime',d.time);
+    setText('time',d.time);
+    setText('hour12',d.hour_12);
+    setText('timezone',d.timezone_name||d.timezone);
+    setText('ipAddress',d.ip_address);
+    setText('ssid',d.ssid);
+    setText('uptime',d.uptime_s+'s');
+    setText('freeMemory',d.free_memory+' bytes');
+    setText('lastSync',d.last_wifi_sync);
+    setText('motorPos',d.motor_position+'/'+d.motor_steps_total);
+    setText('stepsTotal',d.motor_steps_total);
+    setText('lastHour',d.last_hour_shown);
+    setText('flipPower',d.flipdot_power?'ON':'OFF');
+    setDot('dotWifi',d.wifi_connected);
+  }
+
+  function connectWebSocket(){
+    if(ws && ws.readyState === WebSocket.OPEN) return;
+    var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(proto + '//' + location.host + '/ws');
+
+    ws.onopen = function(){
+      console.log('WebSocket connected');
+      wsConnected = true;
+      setDot('dotWifi', true);
+      ws.send(JSON.stringify({cmd:'status'}));
+    };
+
+    ws.onmessage = function(e){
+      try {
+        var msg = JSON.parse(e.data);
+        if(msg.type === 'status' && msg.data){
+          updateStatus(msg.data);
+        } else if(msg.type === 'pong'){
+          console.log('Pong received');
+        }
+      } catch(err){ console.log('WS parse error:', err); }
+    };
+
+    ws.onclose = function(){
+      console.log('WebSocket closed, reconnecting in 3s...');
+      wsConnected = false;
+      setDot('dotWifi', false);
+      clearTimeout(wsReconnectTimer);
+      wsReconnectTimer = setTimeout(connectWebSocket, 3000);
+    };
+
+    ws.onerror = function(err){
+      console.log('WebSocket error:', err);
+      ws.close();
+    };
+  }
+
+  function sendWsCmd(cmd){
+    if(ws && ws.readyState === WebSocket.OPEN){
+      ws.send(JSON.stringify({cmd:cmd}));
+    } else {
+      // Fallback to HTTP if WebSocket not connected
+      postAction('/' + cmd.replace('_','/'));
+    }
+  }
+
+  // Fallback HTTP methods (used when WebSocket unavailable or for complex actions)
   function refreshStatus(){
     fetch('/status.json',{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){
-      setText('currentTime',d.time);
-      setText('time',d.time);
-      setText('hour12',d.hour_12);
-      setText('timezone',d.timezone_name||d.timezone);
-      setText('ipAddress',d.ip_address);
-      setText('ssid',d.ssid);
-      setText('uptime',d.uptime_s+'s');
-      setText('freeMemory',d.free_memory+' bytes');
-      setText('lastSync',d.last_wifi_sync);
-      setText('motorPos',d.motor_position+'/'+d.motor_steps_total);
-      setText('stepsTotal',d.motor_steps_total);
-      setText('lastHour',d.last_hour_shown);
-      setText('flipPower',d.flipdot_power?'ON':'OFF');
-      setDot('dotWifi',d.wifi_connected);
+      updateStatus(d);
     }).catch(function(){});
   }
   function fetchLog(){
@@ -168,7 +224,7 @@
     }).catch(function(){});
   }
   function postAction(endpoint){
-    fetch(endpoint,{method:'POST'}).then(function(){setTimeout(function(){refreshStatus();fetchLog();},500);}).catch(function(){});
+    fetch(endpoint,{method:'POST'}).then(function(){setTimeout(function(){fetchLog();},500);}).catch(function(){});
   }
   function loadTimezones(){
     fetch('/get_timezone',{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){
@@ -205,21 +261,23 @@
     fetch('/set_timezone',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({timezone:tzKey})})
       .then(function(r){return r.json();})
       .then(function(d){
-        if(d.ok){setTimeout(function(){refreshStatus();fetchLog();loadTimezones();},1000);}
+        if(d.ok){setTimeout(function(){fetchLog();loadTimezones();},1000);}
         else{alert('Failed: '+(d.error||'Unknown error'));}
       }).catch(function(){alert('Error setting timezone');});
   }
+
+  // Event listeners - use WebSocket for simple commands, HTTP for complex ones
   document.getElementById('tzSelect').addEventListener('change',function(){if(this.value)setTimezone(this.value);});
-  document.getElementById('wipeBtn').addEventListener('click',function(){postAction('/wipe');});
+  document.getElementById('wipeBtn').addEventListener('click',function(){sendWsCmd('wipe');fetchLog();});
   document.getElementById('syncBtn').addEventListener('click',function(){postAction('/sync_wifi');});
-  document.getElementById('hourPlusBtn').addEventListener('click',function(){postAction('/set_hour');});
-  document.getElementById('minPlusBtn').addEventListener('click',function(){postAction('/set_min');});
+  document.getElementById('hourPlusBtn').addEventListener('click',function(){sendWsCmd('set_hour');fetchLog();});
+  document.getElementById('minPlusBtn').addEventListener('click',function(){sendWsCmd('set_min');fetchLog();});
   document.getElementById('resetNtpBtn').addEventListener('click',function(){postAction('/sync_wifi');});
   document.getElementById('animDemoBtn').addEventListener('click',function(){postAction('/anim/demo');});
   document.getElementById('animChaseBtn').addEventListener('click',function(){postAction('/anim/chase');});
   document.getElementById('animChaosBtn').addEventListener('click',function(){postAction('/anim/chaos');});
   document.getElementById('animSyncBtn').addEventListener('click',function(){postAction('/anim/sync');});
-  document.getElementById('homeBtn').addEventListener('click',function(){postAction('/home');});
+  document.getElementById('homeBtn').addEventListener('click',function(){sendWsCmd('home');fetchLog();});
   document.getElementById('calibrateBtn').addEventListener('click',function(){
     fetch('/calibrate',{method:'POST'}).then(function(r){return r.json();}).then(function(d){
       if(d.ok){document.getElementById('calibOffset').textContent=d.offset+' (nudged: 0)';}
@@ -242,10 +300,15 @@
       setTimeout(function(){fetchLog();},500);
     }).catch(function(){});
   });
-  refreshStatus();
+
+  // Initialize
+  connectWebSocket();
   fetchLog();
   loadTimezones();
-  setInterval(function(){refreshStatus();fetchLog();},5000);
+  // Fallback polling for log updates and if WebSocket fails
+  setInterval(function(){fetchLog();if(!wsConnected)refreshStatus();},5000);
+  // Send ping to keep WebSocket alive
+  setInterval(function(){if(ws && ws.readyState === WebSocket.OPEN)ws.send(JSON.stringify({cmd:'ping'}));},15000);
 })();
 </script>
 </body>
