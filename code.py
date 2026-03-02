@@ -1724,6 +1724,15 @@ def setupWebServer(pool):
         calibration_steps = 0
         return Response(request, body='{"ok":true,"offset":%d}' % new_offset, content_type="application/json")
 
+    @server.route("/reset_calibration", POST)
+    def reset_calibration_route(request: Request):
+        # Reset home offset to zero
+        global calibration_steps
+        save_home_offset_nvm(0)
+        calibration_steps = 0
+        log_action("Home offset reset to 0")
+        return Response(request, body='{"ok":true,"offset":0}', content_type="application/json")
+
     @server.route("/ws")
     def websocket_route(request: Request):
         # WebSocket connection for real-time updates

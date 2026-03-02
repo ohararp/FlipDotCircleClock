@@ -123,6 +123,7 @@
             <button id="nudgeCcwBtn">- CCW</button>
             <button id="nudgeCwBtn">+ CW</button>
             <button id="setHomeBtn">Set Home</button>
+            <button id="resetCalibBtn">Reset</button>
             <span style="font-size:12px;opacity:0.8;margin-left:8px;">Offset: <span id="calibOffset">0</span></span>
           </div>
         </div>
@@ -298,6 +299,12 @@
   document.getElementById('setHomeBtn').addEventListener('click',function(){
     fetch('/set_home',{method:'POST'}).then(function(r){return r.json();}).then(function(d){
       if(d.ok){document.getElementById('calibOffset').textContent=d.offset+' (saved)';}
+      setTimeout(function(){fetchLog();},500);
+    }).catch(function(){});
+  });
+  document.getElementById('resetCalibBtn').addEventListener('click',function(){
+    fetch('/reset_calibration',{method:'POST'}).then(function(r){return r.json();}).then(function(d){
+      if(d.ok){document.getElementById('calibOffset').textContent='0 (reset)';}
       setTimeout(function(){fetchLog();},500);
     }).catch(function(){});
   });
