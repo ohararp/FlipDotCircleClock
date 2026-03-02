@@ -1,7 +1,7 @@
 #%%----------------------------------------------------------------------------
 # FlipDotCircleClock - CircuitPython Flip Dot Clock with Mechanical Minute Hand
 #
-# Requires: CircuitPython 10.x (tested on 10.0.3)
+# Requires: CircuitPython 10.x (tested on 10.1.3)
 #
 # Supported Hardware:
 #   - UnexpectedMaker Feather S2 (ESP32-S2)
@@ -1657,7 +1657,7 @@ if not wifi_status["wifiError"]:
         pool = socketpool.SocketPool(wifi.radio)
         server = setupWebServer(pool)
         clock_web_port = int(os.getenv("CLOCK_WEB_PORT", "80"))
-        server.start(str(wifi.radio.ipv4_address), port=clock_web_port)
+        server.start("0.0.0.0", port=clock_web_port)
         print("Web server started at http://{}:{}".format(wifi.radio.ipv4_address, clock_web_port))
         log_action("Web server started")
     except Exception as e:

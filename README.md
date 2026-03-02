@@ -14,7 +14,7 @@ A CircuitPython-based flip dot clock with a mechanical minute hand, running on U
 
 ## Requirements
 
-- **CircuitPython 10.x** (tested on 10.0.3)
+- **CircuitPython 10.x** (tested on 10.1.3)
 - **Supported Boards:**
   - UnexpectedMaker Feather S2 (ESP32-S2)
   - UnexpectedMaker Feather S3 (ESP32-S3)
