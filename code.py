@@ -241,7 +241,8 @@ def get_uptime():
 # NVM Storage Layout (persists across reboots without filesystem access)
 # NVM[0] = magic byte (0xAB) to verify intentional write (guards against garbage)
 # NVM[1] = timezone index into TIMEZONES tuple
-# NVM[2] = home offset (stored as offset + 128, so 0 = uninitialized)
+# NVM[2] = home offset high byte (16-bit signed, stored as offset + 32768)
+# NVM[3] = home offset low byte
 NVM_MAGIC = 0xAB
 #%%----------------------------------------------------------------------------
 def load_timezone_nvm():
@@ -273,17 +274,18 @@ def save_timezone_nvm(tz_key):
 
 #%%----------------------------------------------------------------------------
 def load_home_offset_nvm():
-    # Load home offset from NVM byte 2. Returns signed int (-127 to +127).
+    # Load home offset from NVM bytes 2-3. Returns signed int (-32767 to +32767).
     # Requires magic byte in NVM[0] to be valid
-    # NVM byte 0 means uninitialized = no offset
-    # NVM byte 1-255 maps to offset -127 to +127 (stored = offset + 128)
+    # Stored as 16-bit unsigned (offset + 32768)
     try:
         if microcontroller.nvm[0] != NVM_MAGIC:  # NVM not initialized
             return 0
-        stored = microcontroller.nvm[2]
+        high_byte = microcontroller.nvm[2]
+        low_byte = microcontroller.nvm[3]
+        stored = (high_byte << 8) | low_byte
         if stored == 0:  # Uninitialized
             return 0
-        offset = stored - 128  # Convert from unsigned (1-255) to signed (-127 to +127)
+        offset = stored - 32768  # Convert from unsigned to signed
         return offset
     except Exception as e:
         print("NVM home offset read error:", e)
@@ -291,14 +293,17 @@ def load_home_offset_nvm():
 
 #%%----------------------------------------------------------------------------
 def save_home_offset_nvm(offset):
-    # Save home offset to NVM byte 2. Offset must be -127 to +127.
-    # stored = offset + 128, so offset 0 = stored 128
+    # Save home offset to NVM bytes 2-3. Offset range: -32767 to +32767.
+    # stored = offset + 32768, so offset 0 = stored 32768
     try:
-        # Clamp to valid range (-127 to +127, since stored 0 = uninitialized)
-        offset = max(-127, min(127, offset))
-        stored = offset + 128  # Convert from signed to unsigned (1-255)
+        # Clamp to valid range
+        offset = max(-32767, min(32767, offset))
+        stored = offset + 32768  # Convert from signed to unsigned (1-65535)
+        high_byte = (stored >> 8) & 0xFF
+        low_byte = stored & 0xFF
         microcontroller.nvm[0] = NVM_MAGIC  # Ensure magic byte is set
-        microcontroller.nvm[2] = stored
+        microcontroller.nvm[2] = high_byte
+        microcontroller.nvm[3] = low_byte
         print("Home offset saved to NVM:", offset, "steps")
         return True
     except Exception as e:
@@ -720,6 +725,7 @@ def getStatusDict():
         "uptime_s": get_uptime(),
         "free_memory": gc.mem_free(),
         "timezone": tz,
+        "home_offset": load_home_offset_nvm(),
     }
 
 #%%----------------------------------------------------------------------------
@@ -1517,6 +1523,7 @@ def setupWebServer(pool):
             "uptime_s": get_uptime(),
             "free_memory": gc.mem_free(),
             "last_wifi_sync": last_wifi_sync_time,
+            "home_offset": load_home_offset_nvm(),
         }
         return Response(request, body=json.dumps(status), content_type="application/json")
 

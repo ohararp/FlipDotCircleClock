@@ -161,6 +161,7 @@
     setText('lastHour',d.last_hour_shown);
     setText('flipPower',d.flipdot_power?'ON':'OFF');
     setDot('dotWifi',d.wifi_connected);
+    if(d.home_offset !== undefined){setText('calibOffset',d.home_offset);}
   }
 
   function connectWebSocket(){
