@@ -241,7 +241,7 @@ def get_uptime():
 # NVM Storage Layout (persists across reboots without filesystem access)
 # NVM[0] = magic byte (0xAB) to verify intentional write (guards against garbage)
 # NVM[1] = timezone index into TIMEZONES tuple
-# NVM[2] = home offset high byte (16-bit signed, stored as offset + 32768)
+# NVM[2] = home offset high byte (16-bit signed, range ±1056, stored as offset + 32768)
 # NVM[3] = home offset low byte
 NVM_MAGIC = 0xAB
 #%%----------------------------------------------------------------------------
@@ -274,7 +274,7 @@ def save_timezone_nvm(tz_key):
 
 #%%----------------------------------------------------------------------------
 def load_home_offset_nvm():
-    # Load home offset from NVM bytes 2-3. Returns signed int (-32767 to +32767).
+    # Load home offset from NVM bytes 2-3. Returns signed int (-1056 to +1056).
     # Requires magic byte in NVM[0] to be valid
     # Stored as 16-bit unsigned (offset + 32768)
     try:
@@ -293,11 +293,11 @@ def load_home_offset_nvm():
 
 #%%----------------------------------------------------------------------------
 def save_home_offset_nvm(offset):
-    # Save home offset to NVM bytes 2-3. Offset range: -32767 to +32767.
+    # Save home offset to NVM bytes 2-3. Offset range: -1056 to +1056 (~30 degrees).
     # stored = offset + 32768, so offset 0 = stored 32768
     try:
-        # Clamp to valid range
-        offset = max(-32767, min(32767, offset))
+        # Clamp to valid range (±1056 steps = ~±30 degrees at 12800 steps/rev)
+        offset = max(-1056, min(1056, offset))
         stored = offset + 32768  # Convert from signed to unsigned (1-65535)
         high_byte = (stored >> 8) & 0xFF
         low_byte = stored & 0xFF
