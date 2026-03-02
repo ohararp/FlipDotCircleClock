@@ -286,6 +286,8 @@ def load_home_offset_nvm():
         if stored == 0:  # Uninitialized
             return 0
         offset = stored - 32768  # Convert from unsigned to signed
+        # Clamp to valid range in case of corrupted data
+        offset = max(-1056, min(1056, offset))
         return offset
     except Exception as e:
         print("NVM home offset read error:", e)
