@@ -825,9 +825,10 @@ def moveHome(delay):
     #en.value = motorDisabled
 
 #%%----------------------------------------------------------------------------
-def findExactHome(delay):
+def findExactHome(delay, apply_offset=True):
     # Find magnet center using symmetric edge detection.
     # Both edges detected at release point for consistency.
+    # apply_offset: if True, apply stored NVM offset after finding center
     print('Finding Exact Home')
     en.value = motorEnabled
 
@@ -911,16 +912,19 @@ def findExactHome(delay):
     stepNow = 0
     print('Home set at center of magnet')
 
-    # Step 7: Apply calibration offset from NVM
-    offset = load_home_offset_nvm()
-    if offset != 0:
-        print('Applying home offset: %d steps' % offset)
-        if offset > 0:
-            multiStep(1, offset, delay)  # CW
-        else:
-            multiStep(0, abs(offset), delay)  # CCW
-        stepNow = 0  # Reset after offset applied
-        print('Offset applied, home position adjusted')
+    # Step 7: Apply calibration offset from NVM (unless in calibration mode)
+    if apply_offset:
+        offset = load_home_offset_nvm()
+        if offset != 0:
+            print('Applying home offset: %d steps' % offset)
+            if offset > 0:
+                multiStep(1, offset, delay)  # CW
+            else:
+                multiStep(0, abs(offset), delay)  # CCW
+            stepNow = 0  # Reset after offset applied
+            print('Offset applied, home position adjusted')
+    else:
+        print('Calibration mode: staying at raw magnet center')
 
     return magnet_width
 
@@ -1688,14 +1692,13 @@ def setupWebServer(pool):
 
     @server.route("/calibrate", POST)
     def calibrate_route(request: Request):
-        # Home motor and stay at 12 o'clock for calibration
+        # Home motor to raw magnet center for calibration (don't apply stored offset)
         global calibration_steps
         calibration_steps = 0  # Reset nudge counter
         log_action("Calibration started")
-        findExactHome(0.00015)
+        findExactHome(0.00015, apply_offset=False)  # Go to raw center
         # Don't call minUpdate - stay at 12 o'clock for adjustment
-        offset = load_home_offset_nvm()
-        return Response(request, body='{"ok":true,"offset":%d,"nudged":0}' % offset, content_type="application/json")
+        return Response(request, body='{"ok":true,"offset":0,"nudged":0}', content_type="application/json")
 
     @server.route("/nudge_cw", POST)
     def nudge_cw_route(request: Request):
@@ -1717,14 +1720,13 @@ def setupWebServer(pool):
 
     @server.route("/set_home", POST)
     def set_home_route(request: Request):
-        # Save current position as new home offset
+        # Save nudge count as new home offset (replaces previous offset)
         global calibration_steps
-        current_offset = load_home_offset_nvm()
-        new_offset = current_offset + calibration_steps
-        save_home_offset_nvm(new_offset)
-        log_action("Home offset set to %d steps" % new_offset)
+        save_home_offset_nvm(calibration_steps)
+        log_action("Home offset set to %d steps" % calibration_steps)
+        saved_offset = calibration_steps
         calibration_steps = 0
-        return Response(request, body='{"ok":true,"offset":%d}' % new_offset, content_type="application/json")
+        return Response(request, body='{"ok":true,"offset":%d}' % saved_offset, content_type="application/json")
 
     @server.route("/reset_calibration", POST)
     def reset_calibration_route(request: Request):
