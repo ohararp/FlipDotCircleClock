@@ -207,9 +207,6 @@ CLOCK_WEB_PORT = 80
 
 # NTP Server (default: pool.ntp.org)
 NTP_SERVER = "pool.ntp.org"
-
-# Default timezone (can be changed via web UI)
-TIMEZONE = "US/Eastern"
 ```
 
 **Port Configuration:**
@@ -361,7 +358,7 @@ The offset (range: -127 to +127 steps) is automatically applied after every homi
 
 ## Timezone Configuration
 
-Timezone can be changed via the web UI dropdown or set as default in `settings.toml`. The selected timezone is saved to the microcontroller's non-volatile memory (NVM) and persists across reboots.
+Timezone can be changed via the web UI dropdown. The selected timezone is saved to the microcontroller's non-volatile memory (NVM) and persists across reboots. Fresh devices default to US/Eastern.
 
 Timezone changes work even with USB connected - no need to disconnect.
 

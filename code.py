@@ -254,7 +254,7 @@ def load_timezone_nvm():
                 return TIMEZONES[tz_index][0]
     except Exception as e:
         print("NVM read error:", e)
-    return os.getenv("TIMEZONE", "US/Eastern")
+    return "US/Eastern"  # Default timezone for fresh devices
 
 #%%----------------------------------------------------------------------------
 def save_timezone_nvm(tz_key):
