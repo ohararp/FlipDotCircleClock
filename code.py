@@ -1345,7 +1345,7 @@ def getWifiTime():
 
     except Exception as e:
         print("NTP Error:", e)
-        setDotstar(YELLOW, 0.25)
+        setDotstar(CYAN, 0.25)
         ucStatus.text = "NTP Error"; print("NTP Error")
         result["msg"] = "NTP Error"
         result["wifiError"] = True
