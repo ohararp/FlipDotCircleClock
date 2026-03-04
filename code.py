@@ -1933,8 +1933,12 @@ while True:
     # Check WiFi connection periodically and reconnect if needed
     if time.monotonic() - last_wifi_check > wifi_check_interval:
         last_wifi_check = time.monotonic()
-        if not wifi.radio.connected:
-            print("WiFi disconnected, attempting reconnect...")
+        # Check both connected flag AND valid IP (radio can report connected with no IP)
+        wifi_ok = wifi.radio.connected and wifi.radio.ipv4_address is not None
+        if not wifi_ok:
+            print("WiFi disconnected (connected={}, ip={}), attempting reconnect...".format(
+                wifi.radio.connected, wifi.radio.ipv4_address))
+            setDotstar(PURPLE, 0.25)
             wifiCircle.fill = None
             wifiStatus.text = "Reconnecting"
             try:
@@ -1945,10 +1949,12 @@ while True:
                 wifiCircle.fill = 0xFFFFFF
                 wifiStatus.text = ssid
                 wifiAddress.text = str(wifi.radio.ipv4_address)
+                setDotstar(GREEN, 0.25)
                 log_action("WiFi reconnected")
             except Exception as e:
                 print("WiFi reconnect failed:", e)
                 wifiStatus.text = "WiFi Error"
+                setDotstar(YELLOW, 0.25)
 
     t = rtc.datetime
 
