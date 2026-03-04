@@ -1230,6 +1230,7 @@ def getWifiTime():
         print("WiFi credentials missing in settings.toml!")
         return {
             "wifiError": True,
+            "ntpError": False,
             "rtc_time": rtc.datetime,
             "ipAddress": None,
             "timezone": timezone,
@@ -1242,6 +1243,7 @@ def getWifiTime():
 
     result = {
         "wifiError": False,
+        "ntpError": False,
         "rtc_time": rtc.datetime,
         "ipAddress": None,
         "timezone": timezone,
@@ -1348,7 +1350,7 @@ def getWifiTime():
         setDotstar(CYAN, 0.25)
         ucStatus.text = "NTP Error"; print("NTP Error")
         result["msg"] = "NTP Error"
-        result["wifiError"] = True
+        result["ntpError"] = True
         result["rtc_time"] = rtc.datetime
 
     return result
