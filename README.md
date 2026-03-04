@@ -260,6 +260,8 @@ The IP address is shown on the OLED display and printed to the serial console.
 | **Chaos** | Random flipdot patterns with oscillating hand movement |
 | **Sync** | Hand sweeps to each hour position, flipdots light up in sync |
 
+> **Note:** All demo patterns need to be reviewed and may require updates.
+
 ### API Endpoints
 
 | Endpoint | Method | Description |
