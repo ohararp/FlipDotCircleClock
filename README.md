@@ -14,7 +14,7 @@ A CircuitPython-based flip dot clock with a mechanical minute hand, running on U
 
 ## Requirements
 
-- **CircuitPython 10.x** (tested on 10.1.3)
+- **CircuitPython 10.x** (tested on 10.1.4)
 - **Supported Boards:**
   - UnexpectedMaker Feather S2 (ESP32-S2)
   - UnexpectedMaker Feather S3 (ESP32-S3)
@@ -188,7 +188,7 @@ Copy the following files/folders from this repository to your CIRCUITPY drive:
 | `lib/` | `CIRCUITPY/lib/` | Required libraries |
 | `settings.toml` | `CIRCUITPY/settings.toml` | Configuration (edit first) |
 
-The `lib/` folder includes all required CircuitPython libraries pre-compiled (.mpy format).
+The `lib/` folder includes all required CircuitPython libraries pre-compiled (.mpy format) from the Adafruit bundle dated March 14, 2026.
 
 **Note**: The code auto-detects which board you're using (Feather S2 or S3) and loads the appropriate LED library.
 
@@ -444,6 +444,8 @@ Daylight Saving Time is automatically calculated for:
 - Ensure 2.4GHz network (ESP32-S2/S3 doesn't support 5GHz)
 - Check serial console for error messages
 - Feather S3 also supports BLE, but this project uses WiFi only
+
+**Note on CircuitPython 10.1.4**: A 3-second delay was added before WiFi connection to allow the WiFi radio to stabilize after motor initialization. Without this delay, WiFi and NTP connections may fail intermittently during startup. This timing fix is already implemented in the code.
 
 ### Motor Not Homing Correctly
 - Verify hall sensor connection (IO14)
