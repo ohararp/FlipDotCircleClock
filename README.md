@@ -6,7 +6,7 @@ A CircuitPython-based flip dot clock with a mechanical minute hand, running on U
 
 - **Flip Dot Hour Display**: 4-column flip dot display shows the current hour (1-12)
 - **Mechanical Minute Hand**: Stepper motor-driven minute hand with precision hall sensor homing
-- **NTP Time Sync**: Automatic time synchronization via NTP with timezone and DST support
+- **NTP Time Sync**: Automatic time synchronization via NTP with timezone, DST support, and hourly resync
 - **OLED Status Display**: 128x64 SH1107 display showing time, WiFi status, and IP address
 - **Web Interface**: Browser-based dashboard for remote monitoring and control
 - **Physical Buttons**: 3 buttons for manual time adjustment and display control
@@ -437,6 +437,36 @@ Daylight Saving Time is automatically calculated for:
 - **AU**: 1st Sunday October → 1st Sunday April
 - **NZ**: Last Sunday September → 1st Sunday April
 
+## Status LED Colors
+
+The onboard LED (DotStar on Feather S2, NeoPixel on Feather S3) indicates the current device status:
+
+| Color | Status | Description |
+|-------|--------|-------------|
+| **Purple** | WiFi Connecting | Device is attempting to connect or reconnect to WiFi |
+| **Green** | WiFi Connected | Successfully connected to WiFi and NTP synced |
+| **Yellow** | WiFi Error | Failed to connect to WiFi network |
+| **Cyan** | NTP Error | WiFi connected, but NTP time sync failed |
+
+### LED Behavior During Operation
+
+- **Startup**: Yellow → Purple (connecting) → Green (success) or Yellow/Cyan (error)
+- **WiFi Reconnect**: Purple while reconnecting → Green on success
+- **NTP Retry**: Cyan persists until NTP sync succeeds
+
+## NTP Sync Schedule
+
+The clock automatically synchronizes time via NTP:
+
+| Event | Behavior |
+|-------|----------|
+| **Startup** | NTP sync attempted immediately after WiFi connects |
+| **Startup Failure** | One automatic retry after 60 seconds |
+| **Hourly Sync** | NTP resync at the top of every hour (:00) |
+| **Manual Sync** | Available via web UI "Sync WiFi" button or `/sync_wifi` API |
+
+If NTP fails at startup, the clock continues running using the battery-backed RTC time. The web interface remains accessible even during NTP errors, allowing manual troubleshooting.
+
 ## Troubleshooting
 
 ### WiFi Connection Issues
@@ -465,6 +495,14 @@ Daylight Saving Time is automatically calculated for:
 - CircuitPython code editor runs on **port 8080**
 - Try accessing `/status.json` directly
 - Check serial console for server errors
+
+### NTP Sync Issues (Cyan LED)
+- Cyan LED indicates WiFi is connected but NTP failed
+- Web interface is still accessible for troubleshooting
+- Check internet connectivity (try pinging NTP server)
+- Verify `NTP_SERVER` in `settings.toml` is reachable
+- Automatic retry occurs after 60 seconds, then hourly
+- Use "Sync WiFi" button in web UI to manually retry
 
 ## License
 

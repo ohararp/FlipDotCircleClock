@@ -1937,6 +1937,11 @@ print("Starting Main Loop")
 last_wifi_check = time.monotonic()
 wifi_check_interval = 30  # Check WiFi every 30 seconds
 
+# NTP sync settings - sync at top of hour, one retry on startup failure
+ntp_has_error = wifi_status.get("ntpError", False)
+ntp_retry_pending = ntp_has_error  # One retry allowed if startup failed
+ntp_retry_time = time.monotonic() + 60 if ntp_has_error else 0
+
 while True:
     # Poll web server for incoming requests
     if server:
@@ -1971,6 +1976,17 @@ while True:
                 wifiStatus.text = "WiFi Error"
                 setDotstar(YELLOW, 0.25)
 
+    # One-time NTP retry if startup failed (after 1 minute)
+    if ntp_retry_pending and time.monotonic() > ntp_retry_time:
+        ntp_retry_pending = False  # Only try once
+        if wifi.radio.connected:
+            print("Retrying NTP sync after startup failure...")
+            result = getWifiTime()
+            ntp_has_error = result.get("ntpError", False)
+            if not ntp_has_error:
+                print("NTP retry successful")
+                log_action("NTP retry OK")
+
     t = rtc.datetime
 
     # Perform Screen Update Every Second
@@ -1993,6 +2009,15 @@ while True:
     if hrOld != hrTest:
         hrUpdate(forceHour=True)
         hourHome()
+
+        # Hourly NTP sync at top of hour
+        if wifi.radio.connected:
+            print("Hourly NTP sync...")
+            result = getWifiTime()
+            ntp_has_error = result.get("ntpError", False)
+            if not ntp_has_error:
+                log_action("Hourly NTP sync OK")
+
         hrOld = hrTest
 
         # Retry NTP sync at the top of each hour if it failed at startup
