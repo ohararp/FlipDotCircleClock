@@ -45,7 +45,6 @@ import random as r
 
 #RTC Libraries
 import adafruit_ds3231
-#import adafruit_pcf8523
 
 # Display Libraries
 from adafruit_display_text import label
@@ -193,29 +192,6 @@ def setBit(value, bitIdx):
 def clrBit(value, bitIdx):
     # Return value with bitIdx cleared to 0.
     return value & ~(1 << bitIdx)
-
-#%%----------------------------------------------------------------------------
-def writeBit(value, bitIdx, bitValue):
-    # Set/clear bitIdx in value based on bitValue.
-    if bitValue == 1:  # setBit
-        output = value | (1 << bitIdx)
-    else:  # clear Bit
-        output = value & ~(1 << bitIdx)
-    return output
-
-#------------------------------------------------------------------------------
-def leftRotate(n, d):
-    # Rotate 12-bit integer n left by d bits.
-    intBits = 12
-    result = (n << d) | (n >> (intBits - d))
-    return result
-
-#------------------------------------------------------------------------------
-def rightRotate(n, d):
-    # Rotate 12-bit integer n right by d bits (masked).
-    intBits = 12
-    result = (n >> d) | (n << (intBits - d)) & 0xFFFFFFFF
-    return result
 
 #%%----------------------------------------------------------------------------
 def log_action(msg):
@@ -856,19 +832,6 @@ def multiStep(data, steps, delay):
         oneStep(data, delay)
         if i % poll_interval == 0:
             pollServer()
-    #en.value = motorDisabled
-
-#%%----------------------------------------------------------------------------
-def moveHome(delay):
-    # Spin motor until hall sensor detects magnet; zero stepNow.
-    en.value = motorEnabled
-    while 1:
-        oneStep(1, delay)
-        if home.value == False:
-            global stepNow
-            stepNow = 0
-            break
-    #en.value = motorDisabled
 
 #%%----------------------------------------------------------------------------
 def findExactHome(delay=None, apply_offset=True):
@@ -1215,7 +1178,6 @@ def setDotstar(color, brightness):
 #%%----------------------------------------------------------------------------
 def getWifiTime():
     # Connect WiFi, fetch UTC time via NTP, apply timezone/DST, set RTC.
-    global wifiError
     global secOld, minOld, hrOld
 
     # Get WiFi credentials from settings.toml
@@ -1238,8 +1200,6 @@ def getWifiTime():
             "delta_s": None,
             "msg": "Check settings.toml",
         }
-
-    wifiError = False
 
     result = {
         "wifiError": False,
@@ -1282,7 +1242,6 @@ def getWifiTime():
                 time.sleep(3)
 
     if not wifi_connected:
-        wifiError = True
         result["wifiError"] = True
         result["msg"] = "WiFi Error"
         print("WiFi Error - All connect attempts failed")
@@ -1495,7 +1454,6 @@ def hourIn(hour):
                [id3,idd3,idd2,0], #10
                [id3,idd3,idd3,0], #11
                [15,15,15,15]]) #12
-               #[1,0,0,0]])   #12
     data = fullIdx[hour]
     return data
 
@@ -1537,56 +1495,6 @@ def blankDisplay():
 
         setFlips([0, 0, 0, 0], 1, managePower=False)
         time.sleep(2.5)
-    finally:
-        time.sleep(relayHoldS)
-        flipsPower(False)
-        invalidateFlipCache()
-
-#%%----------------------------------------------------------------------------
-def blankToBlack():
-    # Quickly force display to black and reset flip cache.
-    flipsPower(True)
-    try:
-        setFlips([0, 0, 0, 0], 1, managePower=False)
-        time.sleep(0.05)
-    finally:
-        time.sleep(relayHoldS)
-        flipsPower(False)
-        invalidateFlipCache()
-
-#%%----------------------------------------------------------------------------
-def playAnimation():
-    # Run simple wipe animation frames on flipdots.
-    ucStatus.text = "Play Animation"
-
-    wipeLt = [[15,0,0,0],[0,15,0,0],[0,0,15,0],[0,0,0,0]]
-    wipeRt = [[0,0,0,15],[0,0,15,0],[0,15,0,0],[15,0,0,0]]
-    frames = [wipeLt, wipeRt]
-
-    flipsPower(True)
-    try:
-        for frame in frames:
-            for col in frame:
-                setFlips(col, 1, managePower=False)
-                time.sleep(0.5)
-                led.value = not led.value
-    finally:
-        time.sleep(relayHoldS)
-        flipsPower(False)
-        invalidateFlipCache()
-
-#%%----------------------------------------------------------------------------
-def roundAnim():
-    # Cycle hours repeatedly to exercise the flipdot display.
-    time.sleep(0.5)
-    print("Round Animation")
-
-    flipsPower(True)
-    try:
-        for _ in range(2):
-            for n in range(0, 13):
-                print(n)
-                setFlips(hourIn(n), 1, managePower=False)
     finally:
         time.sleep(relayHoldS)
         flipsPower(False)
@@ -1964,11 +1872,6 @@ pwr = setupFlipdotPower()
 # Setup the Motor
 [en,step,direct,home,stepSelect]= setupMotor()
 
-# while 1:
-#     roundTo(13)
-#     time.sleep(5)
-#     blankDisplay()
-
 # Play Startup Animation
 ucStatus.text = "Blanking Display"
 blankDisplay()
@@ -1980,7 +1883,7 @@ time.sleep(1.0)
 for i in range(2):
     multiStep(1, r.randint(125, STEPS), STEP_DELAY)
     time.sleep(0.25)
-    magOffset = findExactHome()
+    findExactHome()
 
 # Show the Current RTC Time
 ucStatus.text = "Show Time"
@@ -2108,7 +2011,7 @@ while True:
         numIn = hour24ToHour12(t.tm_hour)
         roundTo(numIn)        # Animate flipdots to current hour
 
-        magOffset = findExactHome()  # Re-home minute hand
+        findExactHome()  # Re-home minute hand
         hrUpdate(forceHour=True)              # Force hour refresh
         minUpdate()                           # Sync minute hand
 
