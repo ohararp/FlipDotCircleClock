@@ -1096,10 +1096,10 @@ def anim_demo():
         # Count through hours 1-12
         for h in range(1, 13):
             setFlips(hourIn(h), 1, managePower=False)
-            time.sleep(0.3)
+            time.sleep(0.5)
         # Blank
         setFlips([0, 0, 0, 0], 1, managePower=False)
-        time.sleep(0.2)
+        time.sleep(0.5)
     finally:
         extendFlipPowerWindow()
     # Restore time
@@ -1118,7 +1118,7 @@ def anim_chase():
             multiStep(1, steps_per_hour, STEP_DELAY)
             # Light up matching hour
             setFlips(hourIn(h), 1, managePower=False)
-            time.sleep(0.15)
+            time.sleep(0.375)
         # Blank at end
         setFlips([0, 0, 0, 0], 1, managePower=False)
         time.sleep(0.1)
@@ -1157,7 +1157,7 @@ def anim_sync():
             multiStep(1, steps_per_hour, STEP_DELAY)
             # Light up matching hour
             setFlips(hourIn(h), 1, managePower=False)
-            time.sleep(0.25)
+            time.sleep(0.375)
     finally:
         extendFlipPowerWindow()
     # Restore time
@@ -1230,6 +1230,7 @@ def getWifiTime():
         print("WiFi credentials missing in settings.toml!")
         return {
             "wifiError": True,
+            "ntpError": False,
             "rtc_time": rtc.datetime,
             "ipAddress": None,
             "timezone": timezone,
@@ -1242,6 +1243,7 @@ def getWifiTime():
 
     result = {
         "wifiError": False,
+        "ntpError": False,
         "rtc_time": rtc.datetime,
         "ipAddress": None,
         "timezone": timezone,
@@ -1257,21 +1259,47 @@ def getWifiTime():
     wifiAddress.text = "---"
     result["msg"] = "Connecting to WiFi"
 
+    # Ensure clean state before connecting
+    if wifi.radio.connected:
+        wifi.radio.stop_station()
+        time.sleep(1)
+
     print("Connecting to %s" % ssid)
-    try:
-        wifi.radio.connect(ssid, password)
-    except Exception as e:
+
+    # Try connection with retries
+    wifi_connect_attempts = 3
+    wifi_connected = False
+    for attempt in range(wifi_connect_attempts):
+        try:
+            if attempt > 0:
+                print("WiFi retry attempt %d of %d" % (attempt + 1, wifi_connect_attempts))
+            wifi.radio.connect(ssid, password, timeout=15)
+            wifi_connected = True
+            break
+        except Exception as e:
+            print("WiFi attempt %d failed: %s" % (attempt + 1, e))
+            if attempt < wifi_connect_attempts - 1:
+                time.sleep(3)
+
+    if not wifi_connected:
         wifiError = True
         result["wifiError"] = True
         result["msg"] = "WiFi Error"
-        print("WiFi Error - Could Not Connect:", e)
+        print("WiFi Error - All connect attempts failed")
         ucStatus.text = "WiFi Error"; print("WiFi Error")
         setDotstar(YELLOW, 0.25)
         return result
 
+    # Wait for DHCP to assign IP address
+    for _ in range(10):
+        if wifi.radio.ipv4_address is not None:
+            break
+        time.sleep(0.5)
+
     ipAddress = wifi.radio.ipv4_address
     result["ipAddress"] = ipAddress
 
+    print("WiFi connected - IP:", ipAddress, "DNS:", wifi.radio.ipv4_dns)
     ucStatus.text = "WiFi Connected"; print("WiFi Available")
     wifiCircle.fill = 0xFFFFFF
     wifiStatus.text = ssid
@@ -1279,13 +1307,114 @@ def getWifiTime():
     setDotstar(GREEN, 0.25)
     result["msg"] = "WiFi Available"
 
+    pool = socketpool.SocketPool(wifi.radio)
+    ntp_max_retries = 3
+    ntp_success = False
+
+    for ntp_attempt in range(ntp_max_retries):
+        try:
+            if ntp_attempt > 0:
+                ucStatus.text = "NTP Retry %d" % (ntp_attempt + 1)
+                print("NTP retry attempt %d of %d" % (ntp_attempt + 1, ntp_max_retries))
+                time.sleep(2)  # Brief delay between retries
+            else:
+                ucStatus.text = "NTP Sync"
+            print("Fetching NTP from", ntp_server)
+            result["msg"] = "NTP Sync"
+
+            # Create NTP client and get UTC time (with increased timeout)
+            ntp = adafruit_ntp.NTP(pool, server=ntp_server, tz_offset=0, socket_timeout=10)
+            utc_time = ntp.datetime
+
+            # Look up timezone offset and DST
+            tz_offset_min = get_timezone_offset(timezone)
+            dst_offset_min = calculate_dst_offset(timezone, utc_time)
+            total_offset_min = tz_offset_min + dst_offset_min
+
+            result["dst"] = dst_offset_min > 0
+
+            # Apply offset to get local time
+            utc_epoch = time.mktime(utc_time)
+            local_epoch = utc_epoch + (total_offset_min * 60)
+            local_time = time.localtime(local_epoch)
+
+            # Build struct_time for RTC
+            local_struct = time.struct_time((
+                local_time.tm_year,
+                local_time.tm_mon,
+                local_time.tm_mday,
+                local_time.tm_hour,
+                local_time.tm_min,
+                local_time.tm_sec,
+                local_time.tm_wday,
+                local_time.tm_yday,
+                1 if result["dst"] else 0
+            ))
+
+            rtc_before = rtc.datetime
+
+            WIFI_RESYNC_THRESHOLD_S = 120
+            try:
+                delta_s = abs(time.mktime(local_struct) - time.mktime(rtc_before))
+            except Exception as e:
+                print("Delta calc failed:", e)
+                delta_s = WIFI_RESYNC_THRESHOLD_S
+
+            result["delta_s"] = delta_s
+
+            rtc.datetime = local_struct
+            result["rtc_time"] = rtc.datetime
+
+            if delta_s >= WIFI_RESYNC_THRESHOLD_S:
+                print("Time drift %.1fs, resyncing" % delta_s)
+                hrUpdate(forceHour=True)
+                minUpdate()
+                syncOldTrackers()
+
+            tz_name = timezone
+            for tz in TIMEZONES:
+                if tz[0] == timezone:
+                    tz_name = tz[1]
+                    break
+            print("RTC updated via NTP (%s, DST=%s)" % (tz_name, result["dst"]))
+            ucStatus.text = "NTP Synced"
+            result["msg"] = "RTC update via NTP"
+            ntp_success = True
+            break  # Success - exit retry loop
+
+        except Exception as e:
+            print("NTP Error (attempt %d): %s" % (ntp_attempt + 1, e))
+            if ntp_attempt < ntp_max_retries - 1:
+                # More retries available, continue loop
+                continue
+
+    # If all retries failed, set NTP error state
+    if not ntp_success:
+        setDotstar(CYAN, 0.25)
+        ucStatus.text = "NTP Error"
+        print("NTP Error - all %d retries failed" % ntp_max_retries)
+        result["msg"] = "NTP Error"
+        result["ntpError"] = True
+        result["rtc_time"] = rtc.datetime
+
+    return result
+
+
+#------------------------------------------------------------------------------
+def retryNtpSync():
+    """Lightweight NTP sync retry - assumes WiFi is already connected.
+    Returns True if sync succeeded, False otherwise."""
+    global last_wifi_sync_time
+
+    ntp_server = os.getenv("NTP_SERVER", "pool.ntp.org")
+    timezone = load_timezone_nvm()
+
+    print("Attempting NTP resync...")
+    ucStatus.text = "NTP Retry"
+    log_action("NTP retry at top of hour")
+
     try:
         pool = socketpool.SocketPool(wifi.radio)
-
-        ucStatus.text = "NTP Sync"; print("Fetching NTP from", ntp_server)
-        result["msg"] = "NTP Sync"
-
-        # Create NTP client and get UTC time
         ntp = adafruit_ntp.NTP(pool, server=ntp_server, tz_offset=0)
         utc_time = ntp.datetime
 
@@ -1293,8 +1422,6 @@ def getWifiTime():
         tz_offset_min = get_timezone_offset(timezone)
         dst_offset_min = calculate_dst_offset(timezone, utc_time)
         total_offset_min = tz_offset_min + dst_offset_min
-
-        result["dst"] = dst_offset_min > 0
 
         # Apply offset to get local time
         utc_epoch = time.mktime(utc_time)
@@ -1311,47 +1438,25 @@ def getWifiTime():
             local_time.tm_sec,
             local_time.tm_wday,
             local_time.tm_yday,
-            1 if result["dst"] else 0
+            1 if dst_offset_min > 0 else 0
         ))
 
-        rtc_before = rtc.datetime
-
-        WIFI_RESYNC_THRESHOLD_S = 120
-        try:
-            delta_s = abs(time.mktime(local_struct) - time.mktime(rtc_before))
-        except Exception as e:
-            print("Delta calc failed:", e)
-            delta_s = WIFI_RESYNC_THRESHOLD_S
-
-        result["delta_s"] = delta_s
-
         rtc.datetime = local_struct
-        result["rtc_time"] = rtc.datetime
 
-        if delta_s >= WIFI_RESYNC_THRESHOLD_S:
-            print("Time drift %.1fs, resyncing" % delta_s)
-            hrUpdate(forceHour=True)
-            minUpdate()
-            syncOldTrackers()
+        t = rtc.datetime
+        last_wifi_sync_time = "{:02}:{:02}:{:02}".format(t.tm_hour, t.tm_min, t.tm_sec)
 
-        tz_name = timezone
-        for tz in TIMEZONES:
-            if tz[0] == timezone:
-                tz_name = tz[1]
-                break
-        print("RTC updated via NTP (%s, DST=%s)" % (tz_name, result["dst"]))
+        print("NTP resync successful")
         ucStatus.text = "NTP Synced"
-        result["msg"] = "RTC update via NTP"
+        setDotstar(GREEN, 0.25)
+        log_action("NTP resync successful")
+        return True
 
     except Exception as e:
-        print("NTP Error:", e)
-        setDotstar(CYAN, 0.25)
-        ucStatus.text = "NTP Error"; print("NTP Error")
-        result["msg"] = "NTP Error"
-        result["wifiError"] = True
-        result["rtc_time"] = rtc.datetime
-
-    return result
+        print("NTP resync failed:", e)
+        ucStatus.text = "NTP Error"
+        log_action("NTP resync failed")
+        return False
 
 
 #------------------------------------------------------------------------------
@@ -1884,25 +1989,32 @@ hrUpdate(forceHour=True)
 minUpdate()
 screenUpdate()
 
-# Connect to Wifi
+# Connect to Wifi - delay allows WiFi radio to stabilize after motor init
 ucStatus.text = "Connecting to Wifi"
+time.sleep(3)
 wifi_status = getWifiTime()
 print(
     wifi_status["msg"],
-    "ok=", (not wifi_status["wifiError"]),
+    "wifi_ok=", (not wifi_status["wifiError"]),
+    "ntp_ok=", (not wifi_status["ntpError"]),
     "ip=", wifi_status["ipAddress"],
     "tz=", wifi_status["timezone"],
     "dst=", wifi_status["dst"],
     "delta_s=", wifi_status["delta_s"],
 )
 
-# Start Web Server if WiFi connected
+# Track if NTP failed at startup for hourly retry
+ntp_failed_at_startup = wifi_status.get("ntpError", False)
+
+# Start Web Server if WiFi connected (even if NTP failed)
 if not wifi_status["wifiError"]:
     ucStatus.text = "Starting Web Server"
     t = rtc.datetime
     last_wifi_sync_time = "{:02}:{:02}:{:02}".format(t.tm_hour, t.tm_min, t.tm_sec)
     log_action("Clock started")
     log_action("WiFi connected: " + str(wifi_status["ipAddress"]))
+    if wifi_status.get("ntpError", False):
+        log_action("NTP sync failed - will retry at top of hour")
     try:
         pool = socketpool.SocketPool(wifi.radio)
         server = setupWebServer(pool)
@@ -1979,6 +2091,11 @@ while True:
         hrUpdate(forceHour=True)
         hourHome()
         hrOld = hrTest
+
+        # Retry NTP sync at the top of each hour if it failed at startup
+        if ntp_failed_at_startup and wifi.radio.connected:
+            if retryNtpSync():
+                ntp_failed_at_startup = False  # Success - stop retrying
 
     # Begin Button Testing
     didManualUpdate = False   # Track whether a button caused a time/mech change
