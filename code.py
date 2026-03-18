@@ -2026,6 +2026,33 @@ def setupWebServer(pool):
     return server
 
 #%%----------------------------------------------------------------------------
+def scanForAP(ssid, max_attempts=3):
+    """Scan for WiFi AP and return True if found with RSSI."""
+    for attempt in range(max_attempts):
+        print("Scanning for WiFi networks (attempt %d/%d)..." % (attempt + 1, max_attempts))
+        try:
+            found_networks = []
+            for network in wifi.radio.start_scanning_networks():
+                found_networks.append((network.ssid, network.rssi))
+                if network.ssid == ssid:
+                    print("  Found %s (RSSI: %d dBm)" % (ssid, network.rssi))
+                    wifi.radio.stop_scanning_networks()
+                    return True, network.rssi
+            wifi.radio.stop_scanning_networks()
+            print("  Scanned %d networks, %s not found" % (len(found_networks), ssid))
+            if found_networks:
+                print("  Visible: %s" % ", ".join(n[0] for n in found_networks[:5]))
+        except Exception as e:
+            print("  Scan error: %s" % e)
+            try:
+                wifi.radio.stop_scanning_networks()
+            except:
+                pass
+        if attempt < max_attempts - 1:
+            time.sleep(2)
+    return False, 0
+
+#%%----------------------------------------------------------------------------
 def teardownNetwork():
     # Cleanly tear down network stack for recovery.
     global server, ws_client, wifi_healthy, server_healthy
@@ -2048,11 +2075,22 @@ def teardownNetwork():
             pass
         server = None
 
-    # Disconnect WiFi cleanly
+    # Disconnect WiFi cleanly and reset radio
     try:
         wifi.radio.stop_station()
     except:
         pass
+
+    # Try to reset WiFi radio by disabling/enabling with longer delays
+    try:
+        print("Resetting WiFi radio (this takes ~15s)...")
+        wifi.radio.enabled = False
+        time.sleep(5)   # 5 seconds disabled to fully reset
+        wifi.radio.enabled = True
+        time.sleep(10)  # 10 seconds for radio to fully initialize
+        print("WiFi radio reset complete")
+    except Exception as e:
+        print("WiFi radio reset error: %s" % e)
 
     wifi_healthy = False
     server_healthy = False
@@ -2086,32 +2124,65 @@ def recoverNetwork(max_wifi_attempts=3, wifi_timeout=15):
         # Step 1: Tear down existing connections
         print("WiFi not connected, performing full teardown...")
         teardownNetwork()
-        time.sleep(1)  # Allow radio to settle
 
-        # Step 2: Reconnect WiFi with retries
+        # Log radio state for debugging
+        print("Radio state after teardown:")
+        print("  enabled=%s, connected=%s" % (wifi.radio.enabled, wifi.radio.connected))
+        try:
+            mac = ":".join("%02x" % b for b in wifi.radio.mac_address)
+            print("  mac=%s" % mac)
+        except:
+            pass
+
+        # Step 1.5: Scan for AP before attempting connection
+        wifiStatus.text = "Scanning..."
+        ap_found, rssi = scanForAP(ssid)
+        if not ap_found:
+            print("AP %s not visible after scanning - may be out of range" % ssid)
+            wifiStatus.text = "AP Not Found"
+            setDotstar(YELLOW, 0.25)
+            # Try a device reset since we can't even see the AP
+            print("Triggering device reset in 10 seconds...")
+            time.sleep(10)
+            microcontroller.reset()
+
+        print("AP %s found (RSSI: %d dBm), proceeding with connection..." % (ssid, rssi))
+        wifiStatus.text = "Connecting..."
+
+        # Step 2: Reconnect WiFi with retries and exponential backoff
         wifi_connected = False
         for attempt in range(max_wifi_attempts):
+            # Exponential backoff: 5s, 10s, 15s between attempts
+            if attempt > 0:
+                backoff = (attempt + 1) * 5
+                print("Waiting %ds before retry %d/%d..." % (backoff, attempt + 1, max_wifi_attempts))
+                wifiStatus.text = "Retry in %ds" % backoff
+                time.sleep(backoff)
+
+            print("WiFi connect attempt %d/%d..." % (attempt + 1, max_wifi_attempts))
+            print("  Radio state: enabled=%s, connected=%s" % (wifi.radio.enabled, wifi.radio.connected))
+
             try:
-                if attempt > 0:
-                    print("WiFi retry %d/%d" % (attempt + 1, max_wifi_attempts))
-                    time.sleep(3)
                 wifi.radio.connect(ssid, password, timeout=wifi_timeout)
                 # Verify connection actually succeeded (connect() doesn't always raise on failure)
-                time.sleep(0.5)  # Brief pause for radio to settle
+                time.sleep(1)  # Give radio time to settle
                 if wifi.radio.connected:
                     wifi_connected = True
                     print("WiFi connect succeeded, connected=%s, ip=%s" % (wifi.radio.connected, wifi.radio.ipv4_address))
                     break
                 else:
-                    print("WiFi connect returned but not connected, attempt %d" % (attempt + 1))
+                    print("WiFi connect returned but not connected (attempt %d)" % (attempt + 1))
             except Exception as e:
-                print("WiFi attempt %d failed: %s" % (attempt + 1, e))
+                print("WiFi attempt %d exception: %s" % (attempt + 1, e))
 
         if not wifi_connected:
-            print("WiFi recovery failed")
-            wifiStatus.text = "WiFi Error"
+            print("WiFi recovery failed after %d attempts" % max_wifi_attempts)
+            wifiStatus.text = "WiFi Failed"
             setDotstar(YELLOW, 0.25)
-            return False
+            # Last resort: trigger device reset
+            print("Triggering device reset in 10 seconds...")
+            time.sleep(10)
+            microcontroller.reset()
 
         # Step 3: Wait for DHCP (up to 15 seconds)
         print("Waiting for DHCP...")
