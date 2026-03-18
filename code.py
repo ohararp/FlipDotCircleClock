@@ -46,6 +46,14 @@ import random as r
 #RTC Libraries
 import adafruit_ds3231
 
+# AS5600 Magnetic Angle Sensor (optional closed-loop control)
+try:
+    import adafruit_as5600
+    AS5600_AVAILABLE = True
+except ImportError:
+    AS5600_AVAILABLE = False
+    print("AS5600 library not found - closed-loop disabled")
+
 # Display Libraries
 from adafruit_display_text import label
 import adafruit_displayio_sh1107
@@ -120,6 +128,10 @@ oePin.value = OE_DISABLE
 # Initialize Step Counter
 stepNow = 0
 lastHourShown = None
+
+# AS5600 sensor (initialized later if available)
+as5600_sensor = None
+as5600_home_offset = 0  # AS5600 raw value at 12 o'clock - auto-detected after homing
 
 # Calibration tracking (for interactive calibration via web UI)
 calibration_steps = 0  # Tracks nudges during calibration session
@@ -500,6 +512,59 @@ def setupRTC(i2c):
     return rtc
 
 #%%----------------------------------------------------------------------------
+def setupAS5600(i2c):
+    # Initialize AS5600 magnetic angle sensor for closed-loop control.
+    # Returns sensor object if successful, None otherwise.
+    global as5600_sensor
+    if not AS5600_AVAILABLE:
+        print("AS5600: Library not available")
+        return None
+    try:
+        sensor = adafruit_as5600.AS5600(i2c)
+        if sensor.magnet_detected:
+            print(f"AS5600: Magnet detected, AGC={sensor.agc}, Mag={sensor.magnitude}")
+            as5600_sensor = sensor
+            return sensor
+        else:
+            print("AS5600: No magnet detected - closed-loop disabled")
+            return None
+    except Exception as e:
+        print(f"AS5600: Init failed ({e}) - closed-loop disabled")
+        return None
+
+#%%----------------------------------------------------------------------------
+def read_as5600_angle():
+    # Read current angle from AS5600 (0-4095) or None if unavailable.
+    if as5600_sensor:
+        try:
+            return as5600_sensor.angle
+        except:
+            return None
+    return None
+
+def as5600_to_degrees(raw):
+    # Convert AS5600 raw value (0-4095) to degrees (0-360).
+    return raw * 360.0 / 4096.0
+
+def as5600_to_steps(raw):
+    # Convert AS5600 raw value (0-4095) to motor steps (0-STEPS).
+    return int(raw * STEPS / 4096) % STEPS
+
+def minute_to_as5600(minute):
+    # Convert minute (0-59) to expected AS5600 raw value.
+    # Uses as5600_home_offset as the reference for 12 o'clock (minute 0).
+    minute_angle = int(minute * 4096 / 60)
+    return (as5600_home_offset + minute_angle) % 4096
+
+def as5600_angle_diff(current, target):
+    # Calculate shortest path difference between angles (positive = CW needed).
+    # Both values are raw AS5600 (0-4095).
+    diff = (target - current) % 4096
+    if diff > 2048:  # Shorter to go CCW
+        diff = diff - 4096
+    return diff
+
+#%%----------------------------------------------------------------------------
 def setHrs():
     # Increment RTC hour by 1 (wrap 0-23) and update screen.
     ucStatus.text = "+1 Hrs"
@@ -834,6 +899,48 @@ def multiStep(data, steps, delay):
             pollServer()
 
 #%%----------------------------------------------------------------------------
+def moveToAngle(target_raw, tolerance=15, max_steps=1000):
+    # Move motor to target AS5600 angle using closed-loop feedback.
+    # target_raw: target angle (0-4095)
+    # tolerance: acceptable error in raw units (~1.3° at tolerance=15)
+    # max_steps: safety limit to prevent infinite loops
+    # Returns True if target reached, False if AS5600 unavailable or max_steps exceeded.
+    if not as5600_sensor:
+        return False
+
+    try:
+        en.value = motorEnabled
+        steps_taken = 0
+
+        while steps_taken < max_steps:
+            current = read_as5600_angle()
+            if current is None:
+                return False
+
+            diff = as5600_angle_diff(current, target_raw)
+
+            if abs(diff) <= tolerance:
+                # Update stepNow from AS5600 for consistency with open-loop tracking
+                global stepNow
+                stepNow = as5600_to_steps(current)
+                return True
+
+            # Step in the appropriate direction (diff > 0 means CW needed)
+            direction = 1 if diff > 0 else 0
+            oneStep(direction, STEP_DELAY)
+            steps_taken += 1
+
+            # Poll server occasionally to keep web responsive
+            if steps_taken % 50 == 0:
+                pollServer()
+
+        print(f"moveToAngle: max_steps exceeded, diff={diff}")
+        return False
+    except Exception as e:
+        print(f"moveToAngle error: {e}")
+        return False
+
+#%%----------------------------------------------------------------------------
 def findExactHome(delay=None, apply_offset=True):
     # Find magnet center using symmetric edge detection.
     # Both edges detected at release point for consistency.
@@ -938,6 +1045,16 @@ def findExactHome(delay=None, apply_offset=True):
     else:
         print('Calibration mode: staying at raw magnet center')
 
+    # Step 8: Record AS5600 angle at 12 o'clock for closed-loop reference
+    global as5600_home_offset
+    if as5600_sensor:
+        try:
+            as5600_home_offset = as5600_sensor.angle
+            print(f'AS5600 at home (12:00): {as5600_home_offset} ({as5600_home_offset * 360.0 / 4096.0:.1f} deg)')
+        except Exception as e:
+            print(f'AS5600 read error at home: {e}')
+            as5600_home_offset = 0
+
     return magnet_width
 
 #%%----------------------------------------------------------------------------
@@ -1010,19 +1127,39 @@ def screenUpdate():
 
 #%%----------------------------------------------------------------------------
 def minUpdate():
-    # Move minute hand and force flipdot blank then hour refresh.
+    # Move minute hand to current minute position.
+    # Uses AS5600 closed-loop control if available, otherwise open-loop step counting.
     print("Updating Dial and Flip Dot")
     t = rtc.datetime
+    target_minute = t.tm_min
 
     global stepNow
-    stepNow %= STEPS
 
-    minSteps = int(round(t.tm_min / 60.0 * STEPS)) % STEPS
+    # Open-loop step counting (primary movement)
+    stepNow %= STEPS
+    minSteps = int(round(target_minute / 60.0 * STEPS)) % STEPS
     stepsNeeded = (minSteps - stepNow) % STEPS
     print("%d %d %d (CW)" % (minSteps, stepNow, stepsNeeded))
 
     if stepsNeeded > 0:
         multiStep(1, stepsNeeded, STEP_DELAY)
+
+    # AS5600 closed-loop correction (if available)
+    # After open-loop move, use AS5600 to verify and fine-tune position
+    try:
+        if as5600_sensor and as5600_sensor.magnet_detected:
+            time.sleep(0.2)  # Let motor settle
+            current_angle = read_as5600_angle()
+            target_angle = minute_to_as5600(target_minute)
+            if current_angle is not None:
+                diff = as5600_angle_diff(current_angle, target_angle)
+                print(f"AS5600 verify: target={target_angle}, current={current_angle}, diff={diff}")
+                # Only correct if error is significant but not huge (avoid runaway)
+                if 15 < abs(diff) < 500:
+                    print(f"AS5600 correcting by {diff} units")
+                    moveToAngle(target_angle, tolerance=10, max_steps=200)
+    except Exception as e:
+        print(f"AS5600 correction error: {e}")
 
 def hrUpdate(forceHour=False):
     # Move minute hand and force flipdot blank then hour refresh.
@@ -1575,6 +1712,10 @@ def setupWebServer(pool):
                 tz_name = timezone[1]
                 break
 
+        # Get AS5600 status
+        as5600_angle = read_as5600_angle()
+        as5600_deg = round(as5600_angle * 360.0 / 4096.0, 1) if as5600_angle is not None else None
+
         status = {
             "time": time_str,
             "hour_12": hr12,
@@ -1593,6 +1734,9 @@ def setupWebServer(pool):
             "last_wifi_sync": last_wifi_sync_time,
             "home_offset": load_home_offset_nvm(),
             "step_delay_us": int(STEP_DELAY * 1000000),
+            "as5600_available": as5600_sensor is not None,
+            "as5600_angle": as5600_angle,
+            "as5600_degrees": as5600_deg,
         }
         return Response(request, body=json.dumps(status), content_type="application/json")
 
@@ -1761,7 +1905,8 @@ def setupWebServer(pool):
         log_action("Calibration started")
         findExactHome(apply_offset=False)  # Go to raw center
         # Don't call minUpdate - stay at 12 o'clock for adjustment
-        return Response(request, body='{"ok":true,"offset":0,"nudged":0}', content_type="application/json")
+        as5600_angle = read_as5600_angle()
+        return Response(request, body='{"ok":true,"offset":0,"nudged":0,"as5600":%s}' % (as5600_angle if as5600_angle else "null"), content_type="application/json")
 
     @server.route("/nudge_cw", POST)
     def nudge_cw_route(request: Request):
@@ -1770,7 +1915,8 @@ def setupWebServer(pool):
         nudge_steps = 50
         multiStep(1, nudge_steps, STEP_DELAY)
         calibration_steps += nudge_steps
-        return Response(request, body='{"ok":true,"nudged":%d}' % calibration_steps, content_type="application/json")
+        as5600_angle = read_as5600_angle()
+        return Response(request, body='{"ok":true,"nudged":%d,"as5600":%s}' % (calibration_steps, as5600_angle if as5600_angle else "null"), content_type="application/json")
 
     @server.route("/nudge_ccw", POST)
     def nudge_ccw_route(request: Request):
@@ -1779,26 +1925,35 @@ def setupWebServer(pool):
         nudge_steps = 50
         multiStep(0, nudge_steps, STEP_DELAY)
         calibration_steps -= nudge_steps
-        return Response(request, body='{"ok":true,"nudged":%d}' % calibration_steps, content_type="application/json")
+        as5600_angle = read_as5600_angle()
+        return Response(request, body='{"ok":true,"nudged":%d,"as5600":%s}' % (calibration_steps, as5600_angle if as5600_angle else "null"), content_type="application/json")
 
     @server.route("/set_home", POST)
     def set_home_route(request: Request):
         # Save nudge count as new home offset (replaces previous offset)
-        global calibration_steps
+        global calibration_steps, as5600_home_offset
         save_home_offset_nvm(calibration_steps)
         log_action("Home offset set to %d steps" % calibration_steps)
         saved_offset = calibration_steps
         calibration_steps = 0
-        return Response(request, body='{"ok":true,"offset":%d}' % saved_offset, content_type="application/json")
+        # Update AS5600 home offset to current position
+        if as5600_sensor:
+            try:
+                as5600_home_offset = as5600_sensor.angle
+                print(f"AS5600 home offset updated to {as5600_home_offset}")
+            except:
+                pass
+        return Response(request, body='{"ok":true,"offset":%d,"as5600_offset":%d}' % (saved_offset, as5600_home_offset), content_type="application/json")
 
     @server.route("/reset_calibration", POST)
     def reset_calibration_route(request: Request):
-        # Reset home offset to zero
-        global calibration_steps
+        # Reset home offset to zero and re-home
+        global calibration_steps, as5600_home_offset
         save_home_offset_nvm(0)
         calibration_steps = 0
+        findExactHome()  # Re-home to update AS5600 offset
         log_action("Home offset reset to 0")
-        return Response(request, body='{"ok":true,"offset":0}', content_type="application/json")
+        return Response(request, body='{"ok":true,"offset":0,"as5600_offset":%d}' % as5600_home_offset, content_type="application/json")
 
     @server.route("/get_speed")
     def get_speed_route(request: Request):
@@ -1856,6 +2011,7 @@ setDotstar(YELLOW,0.5)
 # Setup Clock and Buttons
 i2c = setupI2C()
 rtc = setupRTC(i2c)
+setupAS5600(i2c)  # Initialize AS5600 if available
 butA,butB,butC = setupButton()
 t = rtc.datetime
 
@@ -1884,6 +2040,12 @@ for i in range(2):
     multiStep(1, r.randint(125, STEPS), STEP_DELAY)
     time.sleep(0.25)
     findExactHome()
+
+# Debug: show AS5600 home offset
+print(f"DEBUG: as5600_home_offset = {as5600_home_offset}")
+if as5600_sensor:
+    current = read_as5600_angle()
+    print(f"DEBUG: current AS5600 reading = {current}")
 
 # Show the Current RTC Time
 ucStatus.text = "Show Time"
