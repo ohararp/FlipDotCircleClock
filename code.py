@@ -1382,8 +1382,16 @@ def getWifiTime():
             if attempt > 0:
                 print("WiFi retry attempt %d of %d" % (attempt + 1, wifi_connect_attempts))
             wifi.radio.connect(ssid, password, timeout=15)
-            wifi_connected = True
-            break
+            # Verify connection actually succeeded
+            time.sleep(0.5)
+            if wifi.radio.connected:
+                wifi_connected = True
+                print("WiFi connect succeeded on attempt %d" % (attempt + 1))
+                break
+            else:
+                print("WiFi connect returned but not connected, attempt %d" % (attempt + 1))
+                if attempt < wifi_connect_attempts - 1:
+                    time.sleep(3)
         except Exception as e:
             print("WiFi attempt %d failed: %s" % (attempt + 1, e))
             if attempt < wifi_connect_attempts - 1:
@@ -1397,14 +1405,24 @@ def getWifiTime():
         setDotstar(YELLOW, 0.25)
         return result
 
-    # Wait for DHCP to assign IP address
-    for _ in range(10):
+    # Wait for DHCP to assign IP address (up to 15 seconds)
+    print("Waiting for DHCP...")
+    for i in range(30):
         if wifi.radio.ipv4_address is not None:
+            print("DHCP assigned IP after %d iterations" % i)
             break
         time.sleep(0.5)
 
     ipAddress = wifi.radio.ipv4_address
     result["ipAddress"] = ipAddress
+
+    if not ipAddress:
+        print("WARNING: No IP address assigned after DHCP wait")
+        result["wifiError"] = True
+        result["msg"] = "No IP"
+        ucStatus.text = "No IP"
+        setDotstar(YELLOW, 0.25)
+        return result
 
     print("WiFi connected - IP:", ipAddress, "DNS:", wifi.radio.ipv4_dns)
     ucStatus.text = "WiFi Connected"; print("WiFi Available")
@@ -2049,12 +2067,8 @@ def recoverNetwork(max_wifi_attempts=3, wifi_timeout=15):
     setDotstar(PURPLE, 0.25)
     wifiCircle.fill = None
     wifiStatus.text = "Recovering"
+    wifiAddress.text = "---"  # Clear old IP to avoid confusion
 
-    # Step 1: Tear down existing connections
-    teardownNetwork()
-    time.sleep(1)  # Allow radio to settle
-
-    # Step 2: Reconnect WiFi with retries
     ssid = os.getenv("CIRCUITPY_WIFI_SSID")
     password = os.getenv("CIRCUITPY_WIFI_PASSWORD")
 
@@ -2064,38 +2078,58 @@ def recoverNetwork(max_wifi_attempts=3, wifi_timeout=15):
         setDotstar(YELLOW, 0.25)
         return False
 
-    wifi_connected = False
-    for attempt in range(max_wifi_attempts):
-        try:
-            if attempt > 0:
-                print("WiFi retry %d/%d" % (attempt + 1, max_wifi_attempts))
-                time.sleep(3)
-            wifi.radio.connect(ssid, password, timeout=wifi_timeout)
-            wifi_connected = True
-            break
-        except Exception as e:
-            print("WiFi attempt %d failed: %s" % (attempt + 1, e))
+    # Check if WiFi is actually still connected before tearing down
+    if wifi.radio.connected and wifi.radio.ipv4_address:
+        print("WiFi still connected (%s), skipping teardown - just restarting server" % wifi.radio.ipv4_address)
+        wifi_healthy = True
+    else:
+        # Step 1: Tear down existing connections
+        print("WiFi not connected, performing full teardown...")
+        teardownNetwork()
+        time.sleep(1)  # Allow radio to settle
 
-    if not wifi_connected:
-        print("WiFi recovery failed")
-        wifiStatus.text = "WiFi Error"
-        setDotstar(YELLOW, 0.25)
-        return False
+        # Step 2: Reconnect WiFi with retries
+        wifi_connected = False
+        for attempt in range(max_wifi_attempts):
+            try:
+                if attempt > 0:
+                    print("WiFi retry %d/%d" % (attempt + 1, max_wifi_attempts))
+                    time.sleep(3)
+                wifi.radio.connect(ssid, password, timeout=wifi_timeout)
+                # Verify connection actually succeeded (connect() doesn't always raise on failure)
+                time.sleep(0.5)  # Brief pause for radio to settle
+                if wifi.radio.connected:
+                    wifi_connected = True
+                    print("WiFi connect succeeded, connected=%s, ip=%s" % (wifi.radio.connected, wifi.radio.ipv4_address))
+                    break
+                else:
+                    print("WiFi connect returned but not connected, attempt %d" % (attempt + 1))
+            except Exception as e:
+                print("WiFi attempt %d failed: %s" % (attempt + 1, e))
 
-    # Step 3: Wait for DHCP
-    for _ in range(10):
-        if wifi.radio.ipv4_address:
-            break
-        time.sleep(0.5)
+        if not wifi_connected:
+            print("WiFi recovery failed")
+            wifiStatus.text = "WiFi Error"
+            setDotstar(YELLOW, 0.25)
+            return False
 
-    if not wifi.radio.ipv4_address:
-        print("No IP address assigned")
-        wifiStatus.text = "No IP"
-        setDotstar(YELLOW, 0.25)
-        return False
+        # Step 3: Wait for DHCP (up to 15 seconds)
+        print("Waiting for DHCP...")
+        for i in range(30):  # 30 × 0.5s = 15 seconds
+            ip = wifi.radio.ipv4_address
+            if ip:
+                print("DHCP assigned IP after %d iterations: %s" % (i, ip))
+                break
+            time.sleep(0.5)
 
-    wifi_healthy = True
-    print("WiFi recovered: %s" % wifi.radio.ipv4_address)
+        if not wifi.radio.ipv4_address:
+            print("No IP address assigned after 15s")
+            wifiStatus.text = "No IP"
+            setDotstar(YELLOW, 0.25)
+            return False
+
+        wifi_healthy = True
+        print("WiFi recovered: %s" % wifi.radio.ipv4_address)
 
     # Step 4: Recreate socket pool and server
     try:
@@ -2133,9 +2167,14 @@ def checkNetworkHealth():
     # Check 1: WiFi connected with valid IP
     wifi_ok = wifi.radio.connected and wifi.radio.ipv4_address is not None
     if not wifi_ok:
-        print("Health check: WiFi disconnected")
-        wifi_healthy = False
-        return False
+        # Double-check - sometimes radio reports False briefly
+        time.sleep(0.5)
+        wifi_ok = wifi.radio.connected and wifi.radio.ipv4_address is not None
+        if not wifi_ok:
+            print("Health check: WiFi disconnected (connected=%s, ip=%s)" % (
+                wifi.radio.connected, wifi.radio.ipv4_address))
+            wifi_healthy = False
+            return False
 
     # Check 2: Server poll succeeding (if we have a server)
     if server and last_successful_poll > 0 and (now - last_successful_poll) > POLL_HEALTH_TIMEOUT:
