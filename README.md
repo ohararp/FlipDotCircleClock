@@ -44,6 +44,7 @@ Both boards use the same pin layout - the code auto-detects which board is runni
 | **Momentary Push Buttons** | 3x normally-open | Manual controls | $1-3 |
 | **24V Power Supply** | 2A minimum | Flip dot power | $10-20 |
 | **Neodymium Magnet** | Small disc, ~5mm | Minute hand home marker | $1-2 |
+| **AS5600 Sensor** | I2C magnetic encoder @ 0x36 | Closed-loop position feedback (optional) | $3-8 |
 | **5V Power Supply** | USB-C or 5V adapter | Microcontroller power | $5-10 |
 
 ### Wiring Diagram
@@ -88,6 +89,7 @@ Both boards use the same pin layout - the code auto-detects which board is runni
 | **Button C** | Input | IO33 | +1 Minute button |
 | **DS3231 RTC** | I2C | SDA/SCL | Address: 0x68 |
 | **SH1107 OLED** | I2C | SDA/SCL | Address: 0x3C |
+| **AS5600 Encoder** | I2C | SDA/SCL | Address: 0x36 (optional) |
 | **Onboard LED** | Auto | Internal | Status indicator (auto-detected) |
 
 ### Pin Summary
@@ -116,6 +118,7 @@ User Input:
 I2C Bus (shared):
   - DS3231 RTC:   0x68
   - SH1107 OLED:  0x3C
+  - AS5600:       0x36 (optional)
 ```
 
 ### Stepper Motor Configuration
@@ -189,6 +192,10 @@ Copy the following files/folders from this repository to your CIRCUITPY drive:
 | `settings.toml` | `CIRCUITPY/settings.toml` | Configuration (edit first) |
 
 The `lib/` folder includes all required CircuitPython libraries pre-compiled (.mpy format) from the Adafruit bundle dated March 14, 2026.
+
+**Required libraries**: `adafruit_ds3231`, `adafruit_displayio_sh1107`, `adafruit_display_text`, `adafruit_httpserver`, `adafruit_connection_manager`, and LED libraries for your board.
+
+**Optional**: `adafruit_as5600` - enables closed-loop position control (see AS5600 section below).
 
 **Note**: The code auto-detects which board you're using (Feather S2 or S3) and loads the appropriate LED library.
 
@@ -312,11 +319,61 @@ The IP address is shown on the OLED display and printed to the serial console.
 
 ## Physical Button Functions
 
-| Button | Function |
-|--------|----------|
-| **A** | Blank display, animate to current hour, re-home motor |
-| **B** | Increment RTC hour (+1), refresh flipdot display |
-| **C** | Increment RTC minute (+1), update minute hand |
+Three momentary push buttons provide manual control without needing WiFi or the web interface.
+
+### Button A - Reset/Animation (IO1)
+
+**Action**: Full display reset and re-synchronization
+
+**Sequence**:
+1. Blanks the flip dot display (all dots to off position)
+2. Animates the flip dots to show the current hour (1-12)
+3. Re-homes the minute hand using the hall sensor algorithm
+4. Forces an hour display refresh
+5. Moves the minute hand to the current minute position
+
+**Use Cases**:
+- Visual demonstration of the clock's capabilities
+- Recovery from display glitches or motor desync
+- After manual time adjustments to ensure everything is synchronized
+- Power-on verification that all components are working
+
+### Button B - Increment Hour (IO38)
+
+**Action**: Adds 1 hour to the RTC time and updates the display
+
+**Sequence**:
+1. Increments the RTC hour by 1 (wraps from 23 to 0)
+2. Forces a flip dot display refresh to show the new hour
+
+**Use Cases**:
+- Setting the time manually during initial setup
+- Adjusting for daylight saving time if automatic DST fails
+- Testing flip dot display operation
+
+**Note**: This modifies the battery-backed RTC, so the change persists across power cycles.
+
+### Button C - Increment Minute (IO33)
+
+**Action**: Adds 1 minute to the RTC time and updates the minute hand
+
+**Sequence**:
+1. Increments the RTC minute by 1 (wraps from 59 to 0, does not carry to hours)
+2. Moves the minute hand to the new minute position
+
+**Use Cases**:
+- Fine-tuning the time during initial setup
+- Testing minute hand movement
+- Verifying AS5600 closed-loop correction (if installed)
+
+**Note**: Minutes do not carry over to hours when wrapping from 59 to 0. Use Button B to adjust hours separately.
+
+### Button Behavior Notes
+
+- **Debouncing**: Buttons use internal pull-up resistors and are active-low (pressed = 0)
+- **Priority**: Only one button is processed per main loop iteration (A > B > C)
+- **Web Server**: The web server continues polling during button operations
+- **Tracker Sync**: After any button press, internal time trackers are synchronized to prevent duplicate updates
 
 ## Motor Homing Algorithm
 
@@ -332,6 +389,69 @@ The minute hand uses a hall sensor and magnet for precise homing. The algorithm 
 Both edges are detected at the **release point** for consistency, eliminating hall sensor hysteresis variations.
 
 The "Home" web button pauses at 12:00 for visual verification before the next minute update moves the hand.
+
+## AS5600 Closed-Loop Position Control (Optional)
+
+The clock supports an optional AS5600 magnetic angle sensor for closed-loop position feedback. This eliminates accumulated step errors that can cause the minute hand to drift over time.
+
+### How It Works
+
+The AS5600 is a 12-bit magnetic rotary position sensor (0-4095 counts = 0-360 degrees) that reads the same diametrically magnetized magnet used for the hall effect homing.
+
+**Hybrid Control Strategy:**
+1. **Primary Movement**: Open-loop step counting moves the hand to the target position (fast and reliable)
+2. **Verification**: AS5600 reads the actual position after movement settles
+3. **Correction**: If error exceeds ~1.3 degrees, closed-loop correction steps are applied
+4. **Fallback**: If AS5600 is unavailable, the clock operates in pure open-loop mode
+
+This hybrid approach combines the speed of open-loop control with the accuracy of closed-loop feedback.
+
+### Hardware Setup
+
+| Component | Requirement |
+|-----------|-------------|
+| **Magnet** | Diametrically magnetized disc, 6mm diameter recommended |
+| **Placement** | Centered directly over AS5600 IC, 1-3mm air gap |
+| **Orientation** | North-South poles aligned with sensor axis |
+
+The AS5600 shares the I2C bus with the RTC and OLED display. No additional wiring beyond power and I2C lines is required.
+
+### Linearity Verification
+
+Before relying on AS5600 for closed-loop control, run the linearity test to verify sensor accuracy:
+
+1. Copy `linearity_test.py` to device as `code.py`
+2. The test homes using the hall sensor, then steps through 32 positions around the dial
+3. At each position, it compares AS5600 reading to expected angle
+4. Results are saved to NVM and displayed on the OLED
+
+**Pass Criteria:**
+- Max error < 2.0 degrees: **PASS** - sensor is accurate enough for closed-loop
+- Max error 2.0-5.0 degrees: **MARGINAL** - may work but could benefit from magnet adjustment
+- Max error > 5.0 degrees: **FAIL** - check magnet position/orientation
+
+Use `read_nvm_results.py` to retrieve test results from NVM.
+
+### Status API
+
+When AS5600 is available, the `/status.json` endpoint includes:
+
+```json
+{
+  "as5600_available": true,
+  "as5600_angle": 1255,
+  "as5600_degrees": 110.3
+}
+```
+
+### Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| "No magnet detected" | Check magnet is centered over sensor, verify air gap < 3mm |
+| High linearity error | Adjust magnet centering, check for tilt or eccentricity |
+| AS5600 not detected | Verify I2C wiring, check address 0x36 with I2C scanner |
+| "Library not available" | Install `adafruit_as5600` in lib/ folder |
 
 ## Home Position Calibration
 
