@@ -171,6 +171,14 @@ poll_failure_count = 0
 POLL_HEALTH_TIMEOUT = 60  # Seconds without successful poll = unhealthy
 POLL_FAILURE_THRESHOLD = 5  # Consecutive failures before triggering recovery
 
+# WiFi recovery / offline mode settings
+NVM_WIFI_RESET_COUNT = 200   # NVM offset for reset counter
+NVM_WIFI_RESET_MARKER = 201  # NVM offset for marker byte
+WIFI_RESET_MARKER = 0xAA     # Marker value indicating WiFi failure reset
+MAX_WIFI_RESETS = 3          # Max consecutive resets before offline mode
+OFFLINE_RETRY_AT_TOP_OF_HOUR = True  # Retry WiFi at top of each hour
+last_wifi_retry_hour = -1    # Track last retry hour to avoid duplicates
+
 # HTML Dashboard - loaded from index.html file
 INDEX_HTML_FILE = "/index.html"
 
@@ -1326,7 +1334,35 @@ def setDotstar(color, brightness):
 #%%----------------------------------------------------------------------------
 def getWifiTime():
     # Connect WiFi, fetch UTC time via NTP, apply timezone/DST, set RTC.
-    global secOld, minOld, hrOld
+    global secOld, minOld, hrOld, wifi_healthy
+
+    # Check if we've had too many consecutive WiFi-failure resets
+    nvm = microcontroller.nvm
+    reset_count = nvm[NVM_WIFI_RESET_COUNT] if nvm[NVM_WIFI_RESET_MARKER] == WIFI_RESET_MARKER else 0
+    print("WiFi reset count: %d" % reset_count)
+
+    if reset_count >= MAX_WIFI_RESETS:
+        print("Too many WiFi failures (%d resets), entering offline mode" % reset_count)
+        # Clear counter so next manual power cycle tries WiFi again
+        nvm[NVM_WIFI_RESET_COUNT] = 0
+        nvm[NVM_WIFI_RESET_MARKER] = 0
+        # Load timezone for offline operation
+        timezone = load_timezone_nvm()
+        wifi_healthy = False
+        ucStatus.text = "Offline Mode"
+        wifiStatus.text = "Offline"
+        wifiAddress.text = "Retry @:00"
+        setDotstar(YELLOW, 0.25)
+        return {
+            "wifiError": True,
+            "ntpError": True,
+            "rtc_time": rtc.datetime,
+            "ipAddress": None,
+            "timezone": timezone,
+            "dst": False,
+            "delta_s": None,
+            "msg": "Offline mode - too many WiFi failures",
+        }
 
     # Get WiFi credentials from settings.toml
     ssid = os.getenv("CIRCUITPY_WIFI_SSID")
@@ -1431,6 +1467,13 @@ def getWifiTime():
     wifiAddress.text = str(ipAddress)
     setDotstar(GREEN, 0.25)
     result["msg"] = "WiFi Available"
+
+    # Clear WiFi reset counter on successful connection
+    if nvm[NVM_WIFI_RESET_MARKER] == WIFI_RESET_MARKER:
+        print("Clearing WiFi reset counter (connection successful)")
+        nvm[NVM_WIFI_RESET_COUNT] = 0
+        nvm[NVM_WIFI_RESET_MARKER] = 0
+    wifi_healthy = True
 
     pool = socketpool.SocketPool(wifi.radio)
     ntp_max_retries = 3
@@ -2141,7 +2184,18 @@ def recoverNetwork(max_wifi_attempts=3, wifi_timeout=15):
             print("AP %s not visible after scanning - may be out of range" % ssid)
             wifiStatus.text = "AP Not Found"
             setDotstar(YELLOW, 0.25)
-            # Try a device reset since we can't even see the AP
+            # Increment reset counter and check if we should enter offline mode instead
+            nvm = microcontroller.nvm
+            current_count = nvm[NVM_WIFI_RESET_COUNT] if nvm[NVM_WIFI_RESET_MARKER] == WIFI_RESET_MARKER else 0
+            nvm[NVM_WIFI_RESET_COUNT] = current_count + 1
+            nvm[NVM_WIFI_RESET_MARKER] = WIFI_RESET_MARKER
+            print("WiFi reset counter: %d -> %d" % (current_count, current_count + 1))
+            if current_count + 1 >= MAX_WIFI_RESETS:
+                print("Reset limit reached, staying in offline mode")
+                wifiStatus.text = "Offline"
+                wifiAddress.text = "Retry @:00"
+                return False
+            # Device reset to try fresh boot
             print("Triggering device reset in 10 seconds...")
             time.sleep(10)
             microcontroller.reset()
@@ -2179,6 +2233,17 @@ def recoverNetwork(max_wifi_attempts=3, wifi_timeout=15):
             print("WiFi recovery failed after %d attempts" % max_wifi_attempts)
             wifiStatus.text = "WiFi Failed"
             setDotstar(YELLOW, 0.25)
+            # Increment reset counter and check if we should enter offline mode instead
+            nvm = microcontroller.nvm
+            current_count = nvm[NVM_WIFI_RESET_COUNT] if nvm[NVM_WIFI_RESET_MARKER] == WIFI_RESET_MARKER else 0
+            nvm[NVM_WIFI_RESET_COUNT] = current_count + 1
+            nvm[NVM_WIFI_RESET_MARKER] = WIFI_RESET_MARKER
+            print("WiFi reset counter: %d -> %d" % (current_count, current_count + 1))
+            if current_count + 1 >= MAX_WIFI_RESETS:
+                print("Reset limit reached, staying in offline mode")
+                wifiStatus.text = "Offline"
+                wifiAddress.text = "Retry @:00"
+                return False
             # Last resort: trigger device reset
             print("Triggering device reset in 10 seconds...")
             time.sleep(10)
@@ -2201,6 +2266,13 @@ def recoverNetwork(max_wifi_attempts=3, wifi_timeout=15):
 
         wifi_healthy = True
         print("WiFi recovered: %s" % wifi.radio.ipv4_address)
+
+        # Clear WiFi reset counter on successful recovery
+        nvm = microcontroller.nvm
+        if nvm[NVM_WIFI_RESET_MARKER] == WIFI_RESET_MARKER:
+            print("Clearing WiFi reset counter (recovery successful)")
+            nvm[NVM_WIFI_RESET_COUNT] = 0
+            nvm[NVM_WIFI_RESET_MARKER] = 0
 
     # Step 4: Recreate socket pool and server
     try:
@@ -2426,7 +2498,18 @@ while True:
         hrUpdate(forceHour=True)
         hourHome()
 
-        # Hourly NTP sync at top of hour
+        # Offline mode: retry WiFi at top of hour
+        if not wifi_healthy and OFFLINE_RETRY_AT_TOP_OF_HOUR:
+            if hrTest != last_wifi_retry_hour:
+                print("Offline mode: top of hour, attempting WiFi reconnection...")
+                last_wifi_retry_hour = hrTest
+                if recoverNetwork():
+                    print("WiFi recovered from offline mode!")
+                    log_action("WiFi recovered from offline")
+                else:
+                    print("WiFi retry failed, will try again next hour")
+
+        # Hourly NTP sync at top of hour (only if WiFi connected)
         if wifi.radio.connected:
             print("Hourly NTP sync...")
             result = getWifiTime()
