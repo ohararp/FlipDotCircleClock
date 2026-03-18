@@ -163,6 +163,14 @@ LOG_MAX = 50
 start_time = 0
 last_wifi_sync_time = "Never"
 
+# Network health tracking
+wifi_healthy = False
+server_healthy = False
+last_successful_poll = 0
+poll_failure_count = 0
+POLL_HEALTH_TIMEOUT = 60  # Seconds without successful poll = unhealthy
+POLL_FAILURE_THRESHOLD = 5  # Consecutive failures before triggering recovery
+
 # HTML Dashboard - loaded from index.html file
 INDEX_HTML_FILE = "/index.html"
 
@@ -780,12 +788,15 @@ def oneStep(data, delay):
 #%%----------------------------------------------------------------------------
 def pollServer():
     # Poll web server if available to maintain responsiveness during long operations.
-    global server
+    global server, last_successful_poll, poll_failure_count
     if server:
         try:
             server.poll()
+            last_successful_poll = time.monotonic()
+            poll_failure_count = 0
         except Exception as e:
             print("Server poll error:", e)
+            poll_failure_count += 1
 
 #%%----------------------------------------------------------------------------
 def getStatusDict():
@@ -1997,6 +2008,144 @@ def setupWebServer(pool):
     return server
 
 #%%----------------------------------------------------------------------------
+def teardownNetwork():
+    # Cleanly tear down network stack for recovery.
+    global server, ws_client, wifi_healthy, server_healthy
+
+    print("Tearing down network stack...")
+
+    # Close WebSocket if open
+    if ws_client:
+        try:
+            ws_client.close()
+        except:
+            pass
+        ws_client = None
+
+    # Stop server (if adafruit_httpserver supports it)
+    if server:
+        try:
+            server.stop()
+        except:
+            pass
+        server = None
+
+    # Disconnect WiFi cleanly
+    try:
+        wifi.radio.stop_station()
+    except:
+        pass
+
+    wifi_healthy = False
+    server_healthy = False
+    print("Network stack torn down")
+
+#%%----------------------------------------------------------------------------
+def recoverNetwork(max_wifi_attempts=3, wifi_timeout=15):
+    # Attempt full network stack recovery.
+    global server, wifi_healthy, server_healthy, last_successful_poll, poll_failure_count
+
+    print("Starting network recovery...")
+    setDotstar(PURPLE, 0.25)
+    wifiCircle.fill = None
+    wifiStatus.text = "Recovering"
+
+    # Step 1: Tear down existing connections
+    teardownNetwork()
+    time.sleep(1)  # Allow radio to settle
+
+    # Step 2: Reconnect WiFi with retries
+    ssid = os.getenv("CIRCUITPY_WIFI_SSID")
+    password = os.getenv("CIRCUITPY_WIFI_PASSWORD")
+
+    if not ssid or not password:
+        print("WiFi credentials missing")
+        wifiStatus.text = "No Creds"
+        setDotstar(YELLOW, 0.25)
+        return False
+
+    wifi_connected = False
+    for attempt in range(max_wifi_attempts):
+        try:
+            if attempt > 0:
+                print("WiFi retry %d/%d" % (attempt + 1, max_wifi_attempts))
+                time.sleep(3)
+            wifi.radio.connect(ssid, password, timeout=wifi_timeout)
+            wifi_connected = True
+            break
+        except Exception as e:
+            print("WiFi attempt %d failed: %s" % (attempt + 1, e))
+
+    if not wifi_connected:
+        print("WiFi recovery failed")
+        wifiStatus.text = "WiFi Error"
+        setDotstar(YELLOW, 0.25)
+        return False
+
+    # Step 3: Wait for DHCP
+    for _ in range(10):
+        if wifi.radio.ipv4_address:
+            break
+        time.sleep(0.5)
+
+    if not wifi.radio.ipv4_address:
+        print("No IP address assigned")
+        wifiStatus.text = "No IP"
+        setDotstar(YELLOW, 0.25)
+        return False
+
+    wifi_healthy = True
+    print("WiFi recovered: %s" % wifi.radio.ipv4_address)
+
+    # Step 4: Recreate socket pool and server
+    try:
+        pool = socketpool.SocketPool(wifi.radio)
+        server = setupWebServer(pool)
+        clock_web_port = int(os.getenv("CLOCK_WEB_PORT", "80"))
+        server.start("0.0.0.0", port=clock_web_port)
+        server_healthy = True
+        last_successful_poll = time.monotonic()
+        poll_failure_count = 0
+        print("Server recovered on port %d" % clock_web_port)
+    except Exception as e:
+        print("Server recovery failed: %s" % e)
+        server = None
+        server_healthy = False
+        setDotstar(CYAN, 0.25)
+        return False
+
+    # Step 5: Update UI
+    wifiCircle.fill = 0xFFFFFF
+    wifiStatus.text = ssid
+    wifiAddress.text = str(wifi.radio.ipv4_address)
+    setDotstar(GREEN, 0.25)
+    log_action("Network recovered: " + str(wifi.radio.ipv4_address))
+
+    return True
+
+#%%----------------------------------------------------------------------------
+def checkNetworkHealth():
+    # Check if network stack is healthy, return False if recovery needed.
+    global last_successful_poll, wifi_healthy, server_healthy
+
+    now = time.monotonic()
+
+    # Check 1: WiFi connected with valid IP
+    wifi_ok = wifi.radio.connected and wifi.radio.ipv4_address is not None
+    if not wifi_ok:
+        print("Health check: WiFi disconnected")
+        wifi_healthy = False
+        return False
+
+    # Check 2: Server poll succeeding (if we have a server)
+    if server and last_successful_poll > 0 and (now - last_successful_poll) > POLL_HEALTH_TIMEOUT:
+        print("Health check: No successful poll in %ds" % POLL_HEALTH_TIMEOUT)
+        server_healthy = False
+        return False
+
+    return True
+
+#%%----------------------------------------------------------------------------
 # Setup Functions
 #%%----------------------------------------------------------------------------
 # Startup Stuff
@@ -2073,6 +2222,7 @@ ntp_failed_at_startup = wifi_status.get("ntpError", False)
 
 # Start Web Server if WiFi connected (even if NTP failed)
 if not wifi_status["wifiError"]:
+    wifi_healthy = True  # Mark WiFi as healthy
     ucStatus.text = "Starting Web Server"
     t = rtc.datetime
     last_wifi_sync_time = "{:02}:{:02}:{:02}".format(t.tm_hour, t.tm_min, t.tm_sec)
@@ -2085,11 +2235,14 @@ if not wifi_status["wifiError"]:
         server = setupWebServer(pool)
         clock_web_port = int(os.getenv("CLOCK_WEB_PORT", "80"))
         server.start("0.0.0.0", port=clock_web_port)
+        server_healthy = True  # Mark server as healthy
+        last_successful_poll = time.monotonic()  # Initialize poll tracker
         print("Web server started at http://{}:{}".format(wifi.radio.ipv4_address, clock_web_port))
         log_action("Web server started")
     except Exception as e:
         print("Web server failed to start:", e)
         server = None
+        server_healthy = False
 
 #%%----------------------------------------------------------------------------
 # Main
@@ -2109,34 +2262,25 @@ while True:
     if server:
         try:
             server.poll()
+            last_successful_poll = time.monotonic()
+            poll_failure_count = 0
         except Exception as e:
             print("Server poll error:", e)
+            poll_failure_count += 1
+            if poll_failure_count >= POLL_FAILURE_THRESHOLD:
+                print("Poll failed %d times, marking server unhealthy" % poll_failure_count)
+                server_healthy = False
 
-    # Check WiFi connection periodically and reconnect if needed
+    # Check network health periodically and recover if needed
     if time.monotonic() - last_wifi_check > wifi_check_interval:
         last_wifi_check = time.monotonic()
-        # Check both connected flag AND valid IP (radio can report connected with no IP)
-        wifi_ok = wifi.radio.connected and wifi.radio.ipv4_address is not None
-        if not wifi_ok:
-            print("WiFi disconnected (connected={}, ip={}), attempting reconnect...".format(
-                wifi.radio.connected, wifi.radio.ipv4_address))
-            setDotstar(PURPLE, 0.25)
-            wifiCircle.fill = None
-            wifiStatus.text = "Reconnecting"
-            try:
-                ssid = os.getenv("CIRCUITPY_WIFI_SSID")
-                password = os.getenv("CIRCUITPY_WIFI_PASSWORD")
-                wifi.radio.connect(ssid, password)
-                print("WiFi reconnected:", wifi.radio.ipv4_address)
-                wifiCircle.fill = 0xFFFFFF
-                wifiStatus.text = ssid
-                wifiAddress.text = str(wifi.radio.ipv4_address)
-                setDotstar(GREEN, 0.25)
-                log_action("WiFi reconnected")
-            except Exception as e:
-                print("WiFi reconnect failed:", e)
-                wifiStatus.text = "WiFi Error"
-                setDotstar(YELLOW, 0.25)
+
+        if not checkNetworkHealth():
+            print("Network unhealthy, initiating recovery...")
+            if recoverNetwork():
+                print("Network recovery successful")
+            else:
+                print("Network recovery failed, will retry in %ds" % wifi_check_interval)
 
     # One-time NTP retry if startup failed (after 1 minute)
     if ntp_retry_pending and time.monotonic() > ntp_retry_time:
