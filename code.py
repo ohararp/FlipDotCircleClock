@@ -1035,10 +1035,44 @@ def findExactHome(delay=None, apply_offset=True):
     return magnet_width
 
 #%%----------------------------------------------------------------------------
-def hourHome():
-    # Re-home on the magnet and print the current OLED time text.
-    findExactHome()
-    print(timeArea.text)
+def goHome(tolerance=15):
+    """
+    Move to home position (12 o'clock) using AS5600 absolute position.
+    Always moves clockwise (CW).
+    """
+    global stepNow
+    
+    # Update OLED status
+    ucStatus.text = "Going Home..."
+
+    if not as5600_sensor:
+        print("goHome: AS5600 not available, using findExactHome()")
+        findExactHome()
+        return
+
+    current = read_as5600_angle()
+    target = as5600_home_offset
+
+    # Calculate CW distance in AS5600 units (AS5600 increases with CW rotation)
+    # To move CW from current to target: (target - current) % 4096
+    cw_as5600 = (target - current) % 4096
+
+    if cw_as5600 < tolerance:
+        print("goHome: Already at home (AS5600=%d, home=%d)" % (current, target))
+        stepNow = 0
+        return
+
+    # Convert to steps (12800 steps / 4096 units)
+    cw_steps = int(cw_as5600 * STEPS / 4096)
+
+    print("goHome: AS5600=%d, home=%d, moving %d steps CW" % (current, target, cw_steps))
+    multiStep(1, cw_steps, STEP_DELAY)
+
+    # Fine-tune with AS5600 closed-loop
+    moveToAngle(target, tolerance)
+
+    stepNow = 0
+    print("goHome: At home")
 
 #%%----------------------------------------------------------------------------
 def setupScreen(i2c):
@@ -1655,6 +1689,7 @@ def shiftData(regData):
 def blankDisplay():
     # Run full blank-white-blank sequence and reset flip cache.
     print("Blanking Display")
+    ucStatus.text = "Blanking Display"
 
     flipsPower(True)
     try:
@@ -2308,17 +2343,15 @@ pwr = setupFlipdotPower()
 [en,step,direct,home,stepSelect]= setupMotor()
 
 # Play Startup Animation
-ucStatus.text = "Blanking Display"
 blankDisplay()
 time.sleep(1.0)
 
 # Determine MagOffset
 ucStatus.text = "Magnet Offset"
 time.sleep(1.0)
-for i in range(2):
-    multiStep(1, r.randint(125, STEPS), STEP_DELAY)
-    time.sleep(0.25)
-    findExactHome()
+multiStep(1, r.randint(125, STEPS), STEP_DELAY)
+time.sleep(0.25)
+findExactHome()
 
 # Debug: show AS5600 home offset
 print(f"DEBUG: as5600_home_offset = {as5600_home_offset}")
@@ -2441,7 +2474,8 @@ while True:
     hrTest = t.tm_hour
     if hrOld != hrTest:
         hrUpdate(forceHour=True)
-        hourHome()
+        goHome()
+        print(timeArea.text)
 
         # Offline mode: retry WiFi at top of hour
         if wifi_state == WIFI_OFFLINE and OFFLINE_RETRY_AT_TOP_OF_HOUR:
@@ -2507,8 +2541,28 @@ while True:
             didManualUpdate = True
 
     elif butB.value == 0:
-        setHrs()              # Increment RTC hour
-        hrUpdate(forceHour=True)  # Force hour refresh
+        # Track press start time for long-press detection
+        press_start = time.monotonic()
+        is_long_press = False
+
+        # Wait for release or long-press threshold
+        while butB.value == 0:
+            held_time = time.monotonic() - press_start
+            if held_time >= LONG_PRESS_THRESHOLD:
+                # Long press - test goHome()
+                is_long_press = True
+                print("Button B - Long press, testing goHome()...")
+                goHome()
+                # Wait for button release
+                while butB.value == 0:
+                    time.sleep(0.05)
+                break
+            time.sleep(0.05)
+
+        if not is_long_press:
+            # Short press - original behavior
+            setHrs()              # Increment RTC hour
+            hrUpdate(forceHour=True)  # Force hour refresh
         didManualUpdate = True
 
     elif butC.value == 0:
