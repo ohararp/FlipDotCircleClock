@@ -2,6 +2,9 @@
 # settings.toml  # Tracked in private repo
 secrets.py
 
+# CircuitPython firmware files
+*.uf2
+
 # Python cache
 __pycache__/
 *.py[cod]
