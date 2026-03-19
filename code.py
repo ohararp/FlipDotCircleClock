@@ -1138,39 +1138,54 @@ def screenUpdate():
 
 #%%----------------------------------------------------------------------------
 def minUpdate():
-    # Move minute hand to current minute position.
-    # Uses AS5600 closed-loop control if available, otherwise open-loop step counting.
+    """Move minute hand to current minute using AS5600 with CW-only bulk movement."""
     print("Updating Dial and Flip Dot")
     t = rtc.datetime
     target_minute = t.tm_min
-
     global stepNow
 
-    # Open-loop step counting (primary movement)
-    stepNow %= STEPS
-    minSteps = int(round(target_minute / 60.0 * STEPS)) % STEPS
-    stepsNeeded = (minSteps - stepNow) % STEPS
-    print("%d %d %d (CW)" % (minSteps, stepNow, stepsNeeded))
+    # Calculate target AS5600 angle for this minute
+    target_angle = minute_to_as5600(target_minute)
 
-    if stepsNeeded > 0:
-        multiStep(1, stepsNeeded, STEP_DELAY)
+    if as5600_sensor and as5600_sensor.magnet_detected:
+        # AS5600-based CW movement (like goHome)
+        current = read_as5600_angle()
 
-    # AS5600 closed-loop correction (if available)
-    # After open-loop move, use AS5600 to verify and fine-tune position
-    try:
-        if as5600_sensor and as5600_sensor.magnet_detected:
-            time.sleep(0.2)  # Let motor settle
-            current_angle = read_as5600_angle()
-            target_angle = minute_to_as5600(target_minute)
-            if current_angle is not None:
-                diff = as5600_angle_diff(current_angle, target_angle)
-                print(f"AS5600 verify: target={target_angle}, current={current_angle}, diff={diff}")
-                # Only correct if error is significant but not huge (avoid runaway)
-                if 15 < abs(diff) < 500:
-                    print(f"AS5600 correcting by {diff} units")
-                    moveToAngle(target_angle, tolerance=10, max_steps=200)
-    except Exception as e:
-        print(f"AS5600 correction error: {e}")
+        # Calculate CW distance in AS5600 units
+        cw_as5600 = (target_angle - current) % 4096
+
+        # Check if already close (either direction) - use moveToAngle for small corrections
+        min_distance = min(cw_as5600, 4096 - cw_as5600)
+        if min_distance < 15:  # tolerance - already at target
+            print("minUpdate: Already at target (AS5600=%d, target=%d)" % (current, target_angle))
+            stepNow = int(round(target_minute / 60.0 * STEPS)) % STEPS
+            return
+
+        # If close but not exact, just fine-tune (avoids full revolution for small CCW errors)
+        if min_distance < 100:
+            print("minUpdate: Small correction (AS5600=%d, target=%d, diff=%d)" % (current, target_angle, min_distance))
+            moveToAngle(target_angle, tolerance=15)
+            stepNow = int(round(target_minute / 60.0 * STEPS)) % STEPS
+            return
+
+        # Convert to steps and move CW
+        cw_steps = int(cw_as5600 * STEPS / 4096)
+        print("%d -> %d, moving %d steps CW" % (current, target_angle, cw_steps))
+        multiStep(1, cw_steps, STEP_DELAY)
+
+        # Fine-tune with moveToAngle (small corrections can be CW or CCW)
+        moveToAngle(target_angle, tolerance=15)
+
+        # Sync stepNow with target
+        stepNow = int(round(target_minute / 60.0 * STEPS)) % STEPS
+    else:
+        # Fallback: open-loop step counting (existing behavior)
+        stepNow %= STEPS
+        minSteps = int(round(target_minute / 60.0 * STEPS)) % STEPS
+        stepsNeeded = (minSteps - stepNow) % STEPS
+        print("%d %d %d (CW)" % (minSteps, stepNow, stepsNeeded))
+        if stepsNeeded > 0:
+            multiStep(1, stepsNeeded, STEP_DELAY)
 
 def hrUpdate(forceHour=False):
     # Move minute hand and force flipdot blank then hour refresh.
