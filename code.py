@@ -162,15 +162,21 @@ LOG_MAX = 50
 start_time = 0
 last_wifi_sync_time = "Never"
 
+# WiFi state machine
+WIFI_DISCONNECTED = 0  # Not connected, will attempt connection
+WIFI_CONNECTING = 1    # Currently attempting to connect
+WIFI_CONNECTED = 2     # Connected with working server
+WIFI_OFFLINE = 3       # Failed, no auto-retry (manual or top-of-hour only)
+wifi_state = WIFI_DISCONNECTED
+WIFI_STATE_NAMES = ["DISCONNECTED", "CONNECTING", "CONNECTED", "OFFLINE"]
+
 # Network health tracking
-wifi_healthy = False
-server_healthy = False
 last_successful_poll = 0
 poll_failure_count = 0
 POLL_HEALTH_TIMEOUT = 60  # Seconds without successful poll = unhealthy
 POLL_FAILURE_THRESHOLD = 5  # Consecutive failures before triggering recovery
 
-# WiFi recovery / offline mode settings
+# WiFi recovery settings
 NVM_WIFI_RESET_COUNT = 200   # NVM offset for reset counter
 NVM_WIFI_RESET_MARKER = 201  # NVM offset for marker byte
 WIFI_RESET_MARKER = 0xAA     # Marker value indicating WiFi failure reset
@@ -178,7 +184,29 @@ MAX_WIFI_RESETS = 3          # Max consecutive resets before offline mode
 OFFLINE_RETRY_AT_TOP_OF_HOUR = True  # Retry WiFi at top of each hour
 last_wifi_retry_hour = -1    # Track last retry hour to avoid duplicates
 LONG_PRESS_THRESHOLD = 2.0   # Seconds to hold button A for WiFi reconnect
-offline_mode = False         # When True, skip automatic recovery attempts
+
+def set_wifi_state(new_state, update_ui=True):
+    """Set WiFi state and optionally update display."""
+    global wifi_state
+    old_state = wifi_state
+    wifi_state = new_state
+    print("WiFi state: %s -> %s" % (WIFI_STATE_NAMES[old_state], WIFI_STATE_NAMES[new_state]))
+
+    # Update UI if display is available and requested
+    if update_ui:
+        try:
+            if new_state == WIFI_OFFLINE:
+                wifiStatus.text = "Offline"
+                wifiAddress.text = "Hold A=retry"
+            elif new_state == WIFI_CONNECTING:
+                wifiStatus.text = "Connecting"
+                wifiAddress.text = "---"
+            elif new_state == WIFI_DISCONNECTED:
+                wifiStatus.text = "Disconnected"
+                wifiAddress.text = "---"
+            # WIFI_CONNECTED UI is set by the caller with actual SSID/IP
+        except NameError:
+            pass  # Display not set up yet
 
 # HTML Dashboard - loaded from index.html file
 INDEX_HTML_FILE = "/index.html"
@@ -1264,7 +1292,7 @@ def setDotstar(color, brightness):
 #%%----------------------------------------------------------------------------
 def getWifiTime():
     # Connect WiFi, fetch UTC time via NTP, apply timezone/DST, set RTC.
-    global secOld, minOld, hrOld, wifi_healthy, offline_mode
+    global secOld, minOld, hrOld, wifi_state
 
     # Check if we've had too many consecutive WiFi-failure resets
     nvm = microcontroller.nvm
@@ -1278,11 +1306,8 @@ def getWifiTime():
         nvm[NVM_WIFI_RESET_MARKER] = 0
         # Load timezone for offline operation
         timezone = load_timezone_nvm()
-        wifi_healthy = False
-        offline_mode = True  # Prevent automatic recovery attempts
+        set_wifi_state(WIFI_OFFLINE)
         ucStatus.text = "Offline Mode"
-        wifiStatus.text = "Offline"
-        wifiAddress.text = "Hold A=retry"
         setDotstar(YELLOW, 0.25)
         return {
             "wifiError": True,
@@ -1369,9 +1394,7 @@ def getWifiTime():
         result["msg"] = "WiFi Error"
         print("WiFi Error - All connect attempts failed")
         ucStatus.text = "WiFi Error"; print("WiFi Error")
-        offline_mode = True  # Prevent automatic recovery attempts
-        wifiStatus.text = "Offline"
-        wifiAddress.text = "Hold A=retry"
+        set_wifi_state(WIFI_OFFLINE)
         setDotstar(YELLOW, 0.25)
         return result
 
@@ -1391,9 +1414,7 @@ def getWifiTime():
         result["wifiError"] = True
         result["msg"] = "No IP"
         ucStatus.text = "No IP"
-        offline_mode = True  # Prevent automatic recovery attempts
-        wifiStatus.text = "Offline"
-        wifiAddress.text = "Hold A=retry"
+        set_wifi_state(WIFI_OFFLINE)
         setDotstar(YELLOW, 0.25)
         return result
 
@@ -1410,7 +1431,7 @@ def getWifiTime():
         print("Clearing WiFi reset counter (connection successful)")
         nvm[NVM_WIFI_RESET_COUNT] = 0
         nvm[NVM_WIFI_RESET_MARKER] = 0
-    wifi_healthy = True
+    set_wifi_state(WIFI_CONNECTED, update_ui=False)  # UI updated below with IP
 
     pool = socketpool.SocketPool(wifi.radio)
     ntp_max_retries = 3
@@ -2042,7 +2063,7 @@ def scanForAP(ssid, max_attempts=3):
 #%%----------------------------------------------------------------------------
 def teardownNetwork():
     # Cleanly tear down network stack for recovery.
-    global server, wifi_healthy, server_healthy
+    global server, wifi_state
 
     print("Tearing down network stack...")
 
@@ -2071,20 +2092,18 @@ def teardownNetwork():
     except Exception as e:
         print("WiFi radio reset error: %s" % e)
 
-    wifi_healthy = False
-    server_healthy = False
+    set_wifi_state(WIFI_DISCONNECTED)
     print("Network stack torn down")
 
 #%%----------------------------------------------------------------------------
 def recoverNetwork(max_wifi_attempts=3, wifi_timeout=15):
     # Attempt full network stack recovery.
-    global server, wifi_healthy, server_healthy, last_successful_poll, poll_failure_count, offline_mode
+    global server, wifi_state, last_successful_poll, poll_failure_count
 
     print("Starting network recovery...")
+    set_wifi_state(WIFI_CONNECTING)
     setDotstar(PURPLE, 0.25)
     wifiCircle.fill = None
-    wifiStatus.text = "Recovering"
-    wifiAddress.text = "---"  # Clear old IP to avoid confusion
 
     ssid = os.getenv("CIRCUITPY_WIFI_SSID")
     password = os.getenv("CIRCUITPY_WIFI_PASSWORD")
@@ -2098,7 +2117,7 @@ def recoverNetwork(max_wifi_attempts=3, wifi_timeout=15):
     # Check if WiFi is actually still connected before tearing down
     if wifi.radio.connected and wifi.radio.ipv4_address:
         print("WiFi still connected (%s), skipping teardown - just restarting server" % wifi.radio.ipv4_address)
-        wifi_healthy = True
+        # Will set WIFI_CONNECTED after server restart
     else:
         # Step 1: Tear down existing connections
         print("WiFi not connected, performing full teardown...")
@@ -2128,9 +2147,7 @@ def recoverNetwork(max_wifi_attempts=3, wifi_timeout=15):
             print("WiFi reset counter: %d -> %d" % (current_count, current_count + 1))
             # Stay in offline mode instead of resetting
             print("Staying in offline mode (AP not found)")
-            wifiStatus.text = "Offline"
-            wifiAddress.text = "Hold A=retry"
-            offline_mode = True
+            set_wifi_state(WIFI_OFFLINE)
             return False
 
         print("AP %s found (RSSI: %d dBm), proceeding with connection..." % (ssid, rssi))
@@ -2174,9 +2191,7 @@ def recoverNetwork(max_wifi_attempts=3, wifi_timeout=15):
             print("WiFi reset counter: %d -> %d" % (current_count, current_count + 1))
             # Stay in offline mode instead of resetting
             print("Staying in offline mode (connect failed)")
-            wifiStatus.text = "Offline"
-            wifiAddress.text = "Hold A=retry"
-            offline_mode = True
+            set_wifi_state(WIFI_OFFLINE)
             return False
 
         # Step 3: Wait for DHCP (up to 15 seconds)
@@ -2194,8 +2209,6 @@ def recoverNetwork(max_wifi_attempts=3, wifi_timeout=15):
             setDotstar(YELLOW, 0.25)
             return False
 
-        wifi_healthy = True
-        offline_mode = False  # Exit offline mode on success
         print("WiFi recovered: %s" % wifi.radio.ipv4_address)
 
         # Clear WiFi reset counter on successful recovery
@@ -2211,18 +2224,18 @@ def recoverNetwork(max_wifi_attempts=3, wifi_timeout=15):
         server = setupWebServer(pool)
         clock_web_port = int(os.getenv("CLOCK_WEB_PORT", "80"))
         server.start("0.0.0.0", port=clock_web_port)
-        server_healthy = True
         last_successful_poll = time.monotonic()
         poll_failure_count = 0
         print("Server recovered on port %d" % clock_web_port)
     except Exception as e:
         print("Server recovery failed: %s" % e)
         server = None
-        server_healthy = False
+        set_wifi_state(WIFI_DISCONNECTED)
         setDotstar(CYAN, 0.25)
         return False
 
-    # Step 5: Update UI
+    # Step 5: Update UI and set connected state
+    set_wifi_state(WIFI_CONNECTED, update_ui=False)  # Don't use default UI
     wifiCircle.fill = 0xFFFFFF
     wifiStatus.text = ssid
     wifiAddress.text = str(wifi.radio.ipv4_address)
@@ -2234,7 +2247,7 @@ def recoverNetwork(max_wifi_attempts=3, wifi_timeout=15):
 #%%----------------------------------------------------------------------------
 def checkNetworkHealth():
     # Check if network stack is healthy, return False if recovery needed.
-    global last_successful_poll, wifi_healthy, server_healthy
+    global last_successful_poll, wifi_state
 
     now = time.monotonic()
 
@@ -2247,13 +2260,13 @@ def checkNetworkHealth():
         if not wifi_ok:
             print("Health check: WiFi disconnected (connected=%s, ip=%s)" % (
                 wifi.radio.connected, wifi.radio.ipv4_address))
-            wifi_healthy = False
+            set_wifi_state(WIFI_DISCONNECTED)
             return False
 
     # Check 2: Server poll succeeding (if we have a server)
     if server and last_successful_poll > 0 and (now - last_successful_poll) > POLL_HEALTH_TIMEOUT:
         print("Health check: No successful poll in %ds" % POLL_HEALTH_TIMEOUT)
-        server_healthy = False
+        set_wifi_state(WIFI_DISCONNECTED)
         return False
 
     return True
@@ -2335,7 +2348,6 @@ ntp_failed_at_startup = wifi_status.get("ntpError", False)
 
 # Start Web Server if WiFi connected (even if NTP failed)
 if not wifi_status["wifiError"]:
-    wifi_healthy = True  # Mark WiFi as healthy
     ucStatus.text = "Starting Web Server"
     t = rtc.datetime
     last_wifi_sync_time = "{:02}:{:02}:{:02}".format(t.tm_hour, t.tm_min, t.tm_sec)
@@ -2348,14 +2360,14 @@ if not wifi_status["wifiError"]:
         server = setupWebServer(pool)
         clock_web_port = int(os.getenv("CLOCK_WEB_PORT", "80"))
         server.start("0.0.0.0", port=clock_web_port)
-        server_healthy = True  # Mark server as healthy
+        set_wifi_state(WIFI_CONNECTED, update_ui=False)  # UI already set by getWifiTime
         last_successful_poll = time.monotonic()  # Initialize poll tracker
         print("Web server started at http://{}:{}".format(wifi.radio.ipv4_address, clock_web_port))
         log_action("Web server started")
     except Exception as e:
         print("Web server failed to start:", e)
         server = None
-        server_healthy = False
+        set_wifi_state(WIFI_DISCONNECTED)
 
 #%%----------------------------------------------------------------------------
 # Main
@@ -2381,12 +2393,12 @@ while True:
             print("Server poll error:", e)
             poll_failure_count += 1
             if poll_failure_count >= POLL_FAILURE_THRESHOLD:
-                print("Poll failed %d times, marking server unhealthy" % poll_failure_count)
-                server_healthy = False
+                print("Poll failed %d times, marking unhealthy" % poll_failure_count)
+                set_wifi_state(WIFI_DISCONNECTED)
 
     # Check network health periodically and recover if needed
-    # Skip automatic recovery when in offline_mode (only retry via button or top-of-hour)
-    if not offline_mode and time.monotonic() - last_wifi_check > wifi_check_interval:
+    # Skip automatic recovery when in WIFI_OFFLINE state (only retry via button or top-of-hour)
+    if wifi_state != WIFI_OFFLINE and time.monotonic() - last_wifi_check > wifi_check_interval:
         last_wifi_check = time.monotonic()
 
         if not checkNetworkHealth():
@@ -2428,11 +2440,10 @@ while True:
         hourHome()
 
         # Offline mode: retry WiFi at top of hour
-        if offline_mode and OFFLINE_RETRY_AT_TOP_OF_HOUR:
+        if wifi_state == WIFI_OFFLINE and OFFLINE_RETRY_AT_TOP_OF_HOUR:
             if hrTest != last_wifi_retry_hour:
                 print("Offline mode: top of hour, attempting WiFi reconnection...")
                 last_wifi_retry_hour = hrTest
-                offline_mode = False  # Clear to allow recovery attempt
                 if recoverNetwork():
                     print("WiFi recovered from offline mode!")
                     log_action("WiFi recovered from offline")
@@ -2469,9 +2480,7 @@ while True:
                 # Long press - WiFi reconnect
                 is_long_press = True
                 print("Button A - Long press, attempting WiFi reconnect...")
-                wifiStatus.text = "Reconnecting"
-                offline_mode = False  # Clear offline mode for manual retry
-                recoverNetwork()
+                recoverNetwork()  # Will set state to CONNECTING then CONNECTED/OFFLINE
                 # Wait for button release
                 while butA.value == 0:
                     time.sleep(0.05)
