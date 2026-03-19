@@ -323,33 +323,39 @@ Three momentary push buttons provide manual control without needing WiFi or the 
 
 ### Button A - Reset/Animation (IO1)
 
-**Action**: Full display reset and re-synchronization
+**Short Press**: Full display reset and re-synchronization
 
 **Sequence**:
 1. Blanks the flip dot display (all dots to off position)
 2. Animates the flip dots to show the current hour (1-12)
-3. Re-homes the minute hand using the hall sensor algorithm
+3. Re-homes the minute hand using the hall sensor algorithm (`findExactHome`)
 4. Forces an hour display refresh
 5. Moves the minute hand to the current minute position
+
+**Long Press (2 seconds)**: WiFi reconnect - attempts to reconnect to WiFi and resync NTP time
 
 **Use Cases**:
 - Visual demonstration of the clock's capabilities
 - Recovery from display glitches or motor desync
 - After manual time adjustments to ensure everything is synchronized
 - Power-on verification that all components are working
+- Manual WiFi recovery when in offline mode
 
-### Button B - Increment Hour (IO38)
+### Button B - Increment Hour / Test goHome (IO38)
 
-**Action**: Adds 1 hour to the RTC time and updates the display
+**Short Press**: Adds 1 hour to the RTC time and updates the display
 
 **Sequence**:
 1. Increments the RTC hour by 1 (wraps from 23 to 0)
 2. Forces a flip dot display refresh to show the new hour
 
+**Long Press (2 seconds)**: Tests `goHome()` function - moves minute hand CW to 12 o'clock using AS5600 position
+
 **Use Cases**:
 - Setting the time manually during initial setup
 - Adjusting for daylight saving time if automatic DST fails
 - Testing flip dot display operation
+- Testing AS5600-based homing without full hall sensor sweep
 
 **Note**: This modifies the battery-backed RTC, so the change persists across power cycles.
 
@@ -375,9 +381,13 @@ Three momentary push buttons provide manual control without needing WiFi or the 
 - **Web Server**: The web server continues polling during button operations
 - **Tracker Sync**: After any button press, internal time trackers are synchronized to prevent duplicate updates
 
-## Motor Homing Algorithm
+## Motor Homing
 
-The minute hand uses a hall sensor and magnet for precise homing. The algorithm uses symmetric edge detection for accuracy:
+The clock has two homing methods:
+
+### findExactHome() - Hall Sensor Homing
+
+Used at startup and for calibration. Uses symmetric edge detection for accuracy:
 
 1. Step forward until hall sensor triggers (entering magnet zone)
 2. Reverse until hall sensor releases (precise edge A)
@@ -385,8 +395,22 @@ The minute hand uses a hall sensor and magnet for precise homing. The algorithm 
 4. Step forward until hall releases (precise edge B)
 5. Move to midpoint between edge A and edge B
 6. Set this position as 12:00 (stepNow = 0)
+7. Apply calibration offset from NVM
+8. Record AS5600 angle at home position
 
 Both edges are detected at the **release point** for consistency, eliminating hall sensor hysteresis variations.
+
+### goHome() - AS5600 Fast Homing
+
+Used for hourly re-homing and manual testing. Uses AS5600 absolute position for fast CW movement:
+
+1. Read current AS5600 angle
+2. Calculate CW distance to home position (`as5600_home_offset`)
+3. Move calculated steps clockwise
+4. Fine-tune with AS5600 closed-loop correction
+5. Set stepNow = 0
+
+This is much faster than `findExactHome()` since it moves directly to home without the hall sensor sweep. Falls back to `findExactHome()` if AS5600 is unavailable.
 
 The "Home" web button pauses at 12:00 for visual verification before the next minute update moves the hand.
 
@@ -517,7 +541,7 @@ If running on different hardware (Feather S2 vs S3, different clock speed), you 
 ### Main Loop
 - **Every second**: Update OLED time display, toggle heartbeat LED
 - **Every minute**: Move minute hand to new position
-- **Every hour**: Update flipdot hour display, re-home motor
+- **Every hour**: Update flipdot hour display, re-home motor using `goHome()` (fast AS5600-based homing)
 - **Continuous**: Poll web server, check buttons, manage flipdot power
 
 ## Timezone Configuration
