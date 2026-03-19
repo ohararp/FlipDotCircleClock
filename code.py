@@ -2534,7 +2534,7 @@ while True:
             numIn = hour24ToHour12(t.tm_hour)
             roundTo(numIn)        # Animate flipdots to current hour
 
-            findExactHome()  # Re-home minute hand
+            goHome()  # Re-home minute hand
             hrUpdate(forceHour=True)              # Force hour refresh
             minUpdate()                           # Sync minute hand
 
