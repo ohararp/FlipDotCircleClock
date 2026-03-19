@@ -422,13 +422,14 @@ The clock supports an optional AS5600 magnetic angle sensor for closed-loop posi
 
 The AS5600 is a 12-bit magnetic rotary position sensor (0-4095 counts = 0-360 degrees) that reads the same diametrically magnetized magnet used for the hall effect homing.
 
-**Hybrid Control Strategy:**
-1. **Primary Movement**: Open-loop step counting moves the hand to the target position (fast and reliable)
-2. **Verification**: AS5600 reads the actual position after movement settles
-3. **Correction**: If error exceeds ~1.3 degrees, closed-loop correction steps are applied
-4. **Fallback**: If AS5600 is unavailable, the clock operates in pure open-loop mode
+**AS5600-Primary Control Strategy:**
+1. **Position Reading**: AS5600 reads current absolute position (no drift accumulation)
+2. **CW Calculation**: Calculate clockwise distance to target minute position
+3. **Bulk Movement**: If distance > 100 units (~9°), use fast open-loop CW stepping
+4. **Fine-Tuning**: Use closed-loop `moveToAngle()` for final precision (can be CW or CCW for small corrections)
+5. **Fallback**: If AS5600 is unavailable, falls back to open-loop step counting
 
-This hybrid approach combines the speed of open-loop control with the accuracy of closed-loop feedback.
+This approach uses the AS5600 as the primary position source, eliminating accumulated step errors while maintaining fast movement via open-loop bulk stepping.
 
 ### Hardware Setup
 
@@ -540,7 +541,7 @@ If running on different hardware (Feather S2 vs S3, different clock speed), you 
 
 ### Main Loop
 - **Every second**: Update OLED time display, toggle heartbeat LED
-- **Every minute**: Move minute hand to new position
+- **Every minute**: Move minute hand to new position using AS5600-based CW movement
 - **Every hour**: Update flipdot hour display, re-home motor using `goHome()` (fast AS5600-based homing)
 - **Continuous**: Poll web server, check buttons, manage flipdot power
 
