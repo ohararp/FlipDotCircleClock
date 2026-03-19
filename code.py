@@ -1365,12 +1365,14 @@ def getWifiTime():
         sleepWithUpdates(1)
 
     print("Connecting to %s" % ssid)
+    wifiStatus.text = "Connecting"
 
     # Try connection with retries
     wifi_connect_attempts = 3
     wifi_connected = False
     for attempt in range(wifi_connect_attempts):
         try:
+            wifiStatus.text = "Try %d/%d" % (attempt + 1, wifi_connect_attempts)
             if attempt > 0:
                 print("WiFi retry attempt %d of %d" % (attempt + 1, wifi_connect_attempts))
             wifi.radio.connect(ssid, password, timeout=15)
@@ -1383,10 +1385,12 @@ def getWifiTime():
             else:
                 print("WiFi connect returned but not connected, attempt %d" % (attempt + 1))
                 if attempt < wifi_connect_attempts - 1:
+                    wifiStatus.text = "Retry..."
                     sleepWithUpdates(3)
         except Exception as e:
             print("WiFi attempt %d failed: %s" % (attempt + 1, e))
             if attempt < wifi_connect_attempts - 1:
+                wifiStatus.text = "Retry..."
                 sleepWithUpdates(3)
 
     if not wifi_connected:
