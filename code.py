@@ -177,6 +177,9 @@ WIFI_RESET_MARKER = 0xAA     # Marker value indicating WiFi failure reset
 MAX_WIFI_RESETS = 3          # Max consecutive resets before offline mode
 OFFLINE_RETRY_AT_TOP_OF_HOUR = True  # Retry WiFi at top of each hour
 last_wifi_retry_hour = -1    # Track last retry hour to avoid duplicates
+LONG_PRESS_THRESHOLD = 2.0   # Seconds to hold button A for WiFi reconnect
+RECOVERY_COOLDOWN = 60       # Seconds to wait between recovery attempts
+last_recovery_attempt = 0    # Timestamp of last recovery attempt
 
 # HTML Dashboard - loaded from index.html file
 INDEX_HTML_FILE = "/index.html"
@@ -2069,7 +2072,7 @@ def teardownNetwork():
 #%%----------------------------------------------------------------------------
 def recoverNetwork(max_wifi_attempts=3, wifi_timeout=15):
     # Attempt full network stack recovery.
-    global server, wifi_healthy, server_healthy, last_successful_poll, poll_failure_count
+    global server, wifi_healthy, server_healthy, last_successful_poll, poll_failure_count, last_recovery_attempt
 
     print("Starting network recovery...")
     setDotstar(PURPLE, 0.25)
@@ -2117,15 +2120,12 @@ def recoverNetwork(max_wifi_attempts=3, wifi_timeout=15):
             nvm[NVM_WIFI_RESET_COUNT] = current_count + 1
             nvm[NVM_WIFI_RESET_MARKER] = WIFI_RESET_MARKER
             print("WiFi reset counter: %d -> %d" % (current_count, current_count + 1))
-            if current_count + 1 >= MAX_WIFI_RESETS:
-                print("Reset limit reached, staying in offline mode")
-                wifiStatus.text = "Offline"
-                wifiAddress.text = "Retry @:00"
-                return False
-            # Device reset to try fresh boot
-            print("Triggering device reset in 10 seconds...")
-            sleepWithUpdates(10)
-            microcontroller.reset()
+            # Stay in offline mode instead of resetting
+            print("Staying in offline mode (AP not found)")
+            wifiStatus.text = "Offline"
+            wifiAddress.text = "Hold A=retry"
+            last_recovery_attempt = time.monotonic()
+            return False
 
         print("AP %s found (RSSI: %d dBm), proceeding with connection..." % (ssid, rssi))
         wifiStatus.text = "Connecting..."
@@ -2166,15 +2166,12 @@ def recoverNetwork(max_wifi_attempts=3, wifi_timeout=15):
             nvm[NVM_WIFI_RESET_COUNT] = current_count + 1
             nvm[NVM_WIFI_RESET_MARKER] = WIFI_RESET_MARKER
             print("WiFi reset counter: %d -> %d" % (current_count, current_count + 1))
-            if current_count + 1 >= MAX_WIFI_RESETS:
-                print("Reset limit reached, staying in offline mode")
-                wifiStatus.text = "Offline"
-                wifiAddress.text = "Retry @:00"
-                return False
-            # Last resort: trigger device reset
-            print("Triggering device reset in 10 seconds...")
-            sleepWithUpdates(10)
-            microcontroller.reset()
+            # Stay in offline mode instead of resetting
+            print("Staying in offline mode (connect failed)")
+            wifiStatus.text = "Offline"
+            wifiAddress.text = "Hold A=retry"
+            last_recovery_attempt = time.monotonic()
+            return False
 
         # Step 3: Wait for DHCP (up to 15 seconds)
         print("Waiting for DHCP...")
@@ -2192,6 +2189,7 @@ def recoverNetwork(max_wifi_attempts=3, wifi_timeout=15):
             return False
 
         wifi_healthy = True
+        last_recovery_attempt = 0  # Clear cooldown on success
         print("WiFi recovered: %s" % wifi.radio.ipv4_address)
 
         # Clear WiFi reset counter on successful recovery
@@ -2230,9 +2228,14 @@ def recoverNetwork(max_wifi_attempts=3, wifi_timeout=15):
 #%%----------------------------------------------------------------------------
 def checkNetworkHealth():
     # Check if network stack is healthy, return False if recovery needed.
-    global last_successful_poll, wifi_healthy, server_healthy
+    global last_successful_poll, wifi_healthy, server_healthy, last_recovery_attempt
 
     now = time.monotonic()
+
+    # Check cooldown - don't trigger recovery too frequently
+    if last_recovery_attempt > 0 and (now - last_recovery_attempt) < RECOVERY_COOLDOWN:
+        # In cooldown period, skip health check (stay in offline mode)
+        return True
 
     # Check 1: WiFi connected with valid IP
     wifi_ok = wifi.radio.connected and wifi.radio.ipv4_address is not None
@@ -2452,18 +2455,39 @@ while True:
     didManualUpdate = False   # Track whether a button caused a time/mech change
 
     if butA.value == 0:
-        print("Button A - Pressed")
-        blankDisplay()        # Clear display before re-animating hour
+        # Track press start time for long-press detection
+        press_start = time.monotonic()
+        is_long_press = False
 
-        t = rtc.datetime
-        numIn = hour24ToHour12(t.tm_hour)
-        roundTo(numIn)        # Animate flipdots to current hour
+        # Wait for release or long-press threshold
+        while butA.value == 0:
+            held_time = time.monotonic() - press_start
+            if held_time >= LONG_PRESS_THRESHOLD:
+                # Long press - WiFi reconnect
+                is_long_press = True
+                print("Button A - Long press, attempting WiFi reconnect...")
+                wifiStatus.text = "Reconnecting"
+                recoverNetwork()
+                # Wait for button release
+                while butA.value == 0:
+                    time.sleep(0.05)
+                break
+            time.sleep(0.05)
 
-        findExactHome()  # Re-home minute hand
-        hrUpdate(forceHour=True)              # Force hour refresh
-        minUpdate()                           # Sync minute hand
+        if not is_long_press:
+            # Short press - original behavior
+            print("Button A - Short press, re-homing")
+            blankDisplay()        # Clear display before re-animating hour
 
-        didManualUpdate = True
+            t = rtc.datetime
+            numIn = hour24ToHour12(t.tm_hour)
+            roundTo(numIn)        # Animate flipdots to current hour
+
+            findExactHome()  # Re-home minute hand
+            hrUpdate(forceHour=True)              # Force hour refresh
+            minUpdate()                           # Sync minute hand
+
+            didManualUpdate = True
 
     elif butB.value == 0:
         setHrs()              # Increment RTC hour

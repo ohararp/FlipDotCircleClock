@@ -293,8 +293,9 @@
   refreshStatus();
   fetchLog();
   loadTimezones();
-  // Poll for status and log updates every 5 seconds
-  setInterval(function(){refreshStatus();fetchLog();},5000);
+  // Poll for status every second, log updates every 5 seconds
+  setInterval(function(){refreshStatus();},1000);
+  setInterval(function(){fetchLog();},5000);
 })();
 </script>
 </body>
