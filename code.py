@@ -1,7 +1,7 @@
 #%%----------------------------------------------------------------------------
 # FlipDotCircleClock - CircuitPython Flip Dot Clock with Mechanical Minute Hand
 #
-# Requires: CircuitPython 10.x (tested on 10.1.3)
+# Requires: CircuitPython 10.x (tested on 10.1.4)
 #
 # Supported Hardware:
 #   - UnexpectedMaker Feather S2 (ESP32-S2)
@@ -511,7 +511,7 @@ def calculate_dst_offset(tz_key, utc_time):
 #%%----------------------------------------------------------------------------
 def sayHello():
     # Print startup banner plus free RAM and flash stats.
-    print("\nHello from FeatherS2!")
+    print("\nHello from FeatherS3!")
     print("---------------------\n")
 
     # Show available memory
