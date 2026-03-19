@@ -149,7 +149,7 @@
         <div class="logtitle">Action Log</div>
         <div class="log" id="log">Loading...</div>
         <div class="footer">
-          API: <a class="linkpill" href="/status.json">/status.json</a>
+          API: <a class="linkpill" href="/status">/status</a>
           <a class="linkpill" style="margin-left:8px;" href="/log.json">/log.json</a>
         </div>
       </div>
@@ -157,10 +157,6 @@
   </div>
 <script>
 (function(){
-  var ws = null;
-  var wsReconnectTimer = null;
-  var wsConnected = false;
-
   function setText(id,val){var el=document.getElementById(id);if(!el)return;if(val===null||val===undefined||val==="")val="--";el.textContent=String(val);}
   function setDot(id,ok){var el=document.getElementById(id);if(!el)return;el.className="dot "+(ok?"ok":"bad");}
 
@@ -183,57 +179,14 @@
     if(d.step_delay_us !== undefined){setText('currentSpeed',d.step_delay_us);document.getElementById('stepDelaySelect').value=d.step_delay_us;}
   }
 
-  function connectWebSocket(){
-    if(ws && ws.readyState === WebSocket.OPEN) return;
-    var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    ws = new WebSocket(proto + '//' + location.host + '/ws');
-
-    ws.onopen = function(){
-      console.log('WebSocket connected');
-      wsConnected = true;
-      setDot('dotWifi', true);
-      ws.send(JSON.stringify({cmd:'status'}));
-    };
-
-    ws.onmessage = function(e){
-      try {
-        var msg = JSON.parse(e.data);
-        if(msg.type === 'status' && msg.data){
-          updateStatus(msg.data);
-        } else if(msg.type === 'pong'){
-          console.log('Pong received');
-        }
-      } catch(err){ console.log('WS parse error:', err); }
-    };
-
-    ws.onclose = function(){
-      console.log('WebSocket closed, reconnecting in 3s...');
-      wsConnected = false;
-      setDot('dotWifi', false);
-      clearTimeout(wsReconnectTimer);
-      wsReconnectTimer = setTimeout(connectWebSocket, 3000);
-    };
-
-    ws.onerror = function(err){
-      console.log('WebSocket error:', err);
-      ws.close();
-    };
-  }
-
-  function sendWsCmd(cmd){
-    if(ws && ws.readyState === WebSocket.OPEN){
-      ws.send(JSON.stringify({cmd:cmd}));
-    } else {
-      // Fallback to HTTP if WebSocket not connected
-      postAction('/' + cmd.replace('_','/'));
-    }
-  }
-
-  // Fallback HTTP methods (used when WebSocket unavailable or for complex actions)
+  // HTTP polling for status updates
   function refreshStatus(){
-    fetch('/status.json',{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){
+    fetch('/status',{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){
       updateStatus(d);
-    }).catch(function(){});
+      setDot('dotWifi', true);
+    }).catch(function(){
+      setDot('dotWifi', false);
+    });
   }
   function fetchLog(){
     fetch('/log.json',{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){
@@ -286,18 +239,18 @@
       }).catch(function(){alert('Error setting timezone');});
   }
 
-  // Event listeners - use WebSocket for simple commands, HTTP for complex ones
+  // Event listeners - all commands via HTTP
   document.getElementById('tzSelect').addEventListener('change',function(){if(this.value)setTimezone(this.value);});
-  document.getElementById('wipeBtn').addEventListener('click',function(){sendWsCmd('wipe');fetchLog();});
+  document.getElementById('wipeBtn').addEventListener('click',function(){postAction('/wipe');});
   document.getElementById('syncBtn').addEventListener('click',function(){postAction('/sync_wifi');});
-  document.getElementById('hourPlusBtn').addEventListener('click',function(){sendWsCmd('set_hour');fetchLog();});
-  document.getElementById('minPlusBtn').addEventListener('click',function(){sendWsCmd('set_min');fetchLog();});
+  document.getElementById('hourPlusBtn').addEventListener('click',function(){postAction('/set_hour');});
+  document.getElementById('minPlusBtn').addEventListener('click',function(){postAction('/set_min');});
   document.getElementById('resetNtpBtn').addEventListener('click',function(){postAction('/sync_wifi');});
   document.getElementById('animDemoBtn').addEventListener('click',function(){postAction('/anim/demo');});
   document.getElementById('animChaseBtn').addEventListener('click',function(){postAction('/anim/chase');});
   document.getElementById('animChaosBtn').addEventListener('click',function(){postAction('/anim/chaos');});
   document.getElementById('animSyncBtn').addEventListener('click',function(){postAction('/anim/sync');});
-  document.getElementById('homeBtn').addEventListener('click',function(){sendWsCmd('home');fetchLog();});
+  document.getElementById('homeBtn').addEventListener('click',function(){postAction('/home');});
   document.getElementById('calibrateBtn').addEventListener('click',function(){
     fetch('/calibrate',{method:'POST'}).then(function(r){return r.json();}).then(function(d){
       if(d.ok){document.getElementById('calibOffset').textContent=d.offset+' (nudged: 0)';}
@@ -336,14 +289,12 @@
       }).catch(function(){});
   });
 
-  // Initialize
-  connectWebSocket();
+  // Initialize - HTTP polling
+  refreshStatus();
   fetchLog();
   loadTimezones();
-  // Fallback polling for log updates and if WebSocket fails
-  setInterval(function(){fetchLog();if(!wsConnected)refreshStatus();},5000);
-  // Send ping to keep WebSocket alive
-  setInterval(function(){if(ws && ws.readyState === WebSocket.OPEN)ws.send(JSON.stringify({cmd:'ping'}));},15000);
+  // Poll for status and log updates every 5 seconds
+  setInterval(function(){refreshStatus();fetchLog();},5000);
 })();
 </script>
 </body>

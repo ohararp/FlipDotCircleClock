@@ -72,7 +72,7 @@ import json
 import microcontroller
 
 # Web Server Libraries
-from adafruit_httpserver import Server, Request, Response, POST, Websocket
+from adafruit_httpserver import Server, Request, Response, POST
 
 # LED Libraries - auto-detect board type
 # Feather S2 uses DotStar (APA102), Feather S3 uses NeoPixel (WS2812)
@@ -157,7 +157,6 @@ hrOld  = 255
 
 # Web Server Variables
 server = None
-ws_client = None  # Active WebSocket connection
 action_log = []
 LOG_MAX = 50
 start_time = 0
@@ -837,77 +836,6 @@ def getStatusDict():
     }
 
 #%%----------------------------------------------------------------------------
-def sendWebSocketStatus():
-    # Send current status to WebSocket client if connected.
-    global ws_client
-    if ws_client:
-        try:
-            status = getStatusDict()
-            ws_client.send_message(json.dumps({"type": "status", "data": status}))
-        except Exception as e:
-            print("WebSocket send error:", e)
-            try:
-                ws_client.close()
-            except:
-                pass
-            ws_client = None
-
-#%%----------------------------------------------------------------------------
-def handleWebSocket():
-    # Handle incoming WebSocket messages (commands from client).
-    global ws_client
-    if not ws_client:
-        return
-
-    try:
-        msg = ws_client.receive(fail_silently=True)
-        if msg:
-            print("WebSocket received:", msg)
-            try:
-                data = json.loads(msg)
-                cmd = data.get("cmd", "")
-
-                if cmd == "status":
-                    sendWebSocketStatus()
-                elif cmd == "wipe":
-                    log_action("Wipe via WebSocket")
-                    blankDisplay()
-                    t = rtc.datetime
-                    numIn = hour24ToHour12(t.tm_hour)
-                    roundTo(numIn)
-                    findExactHome()
-                    hrUpdate(forceHour=True)
-                    minUpdate()
-                    sendWebSocketStatus()
-                elif cmd == "set_hour":
-                    log_action("+1 hour via WebSocket")
-                    setHrs()
-                    hrUpdate(forceHour=True)
-                    sendWebSocketStatus()
-                elif cmd == "set_min":
-                    log_action("+1 minute via WebSocket")
-                    setMins()
-                    minUpdate()
-                    sendWebSocketStatus()
-                elif cmd == "home":
-                    log_action("Home via WebSocket")
-                    findExactHome()
-                    time.sleep(2)
-                    minUpdate()
-                    sendWebSocketStatus()
-                elif cmd == "ping":
-                    ws_client.send_message(json.dumps({"type": "pong"}))
-            except Exception as e:
-                print("WebSocket command error:", e)
-    except Exception as e:
-        print("WebSocket receive error:", e)
-        try:
-            ws_client.close()
-        except:
-            pass
-        ws_client = None
-
-#%%----------------------------------------------------------------------------
 def multiStep(data, steps, delay):
     # Step motor multiple times with enable control.
     en.value = motorEnabled
@@ -1406,7 +1334,7 @@ def getWifiTime():
     # Ensure clean state before connecting
     if wifi.radio.connected:
         wifi.radio.stop_station()
-        time.sleep(1)
+        sleepWithUpdates(1)
 
     print("Connecting to %s" % ssid)
 
@@ -1427,11 +1355,11 @@ def getWifiTime():
             else:
                 print("WiFi connect returned but not connected, attempt %d" % (attempt + 1))
                 if attempt < wifi_connect_attempts - 1:
-                    time.sleep(3)
+                    sleepWithUpdates(3)
         except Exception as e:
             print("WiFi attempt %d failed: %s" % (attempt + 1, e))
             if attempt < wifi_connect_attempts - 1:
-                time.sleep(3)
+                sleepWithUpdates(3)
 
     if not wifi_connected:
         result["wifiError"] = True
@@ -1484,7 +1412,7 @@ def getWifiTime():
             if ntp_attempt > 0:
                 ucStatus.text = "NTP Retry %d" % (ntp_attempt + 1)
                 print("NTP retry attempt %d of %d" % (ntp_attempt + 1, ntp_max_retries))
-                time.sleep(2)  # Brief delay between retries
+                sleepWithUpdates(2)  # Keep display updated during retry
             else:
                 ucStatus.text = "NTP Sync"
             print("Fetching NTP from", ntp_server)
@@ -2051,20 +1979,11 @@ def setupWebServer(pool):
             print("set_speed error:", e)
             return Response(request, body='{"ok":false,"error":"Parse error"}', content_type="application/json")
 
-    @server.route("/ws")
-    def websocket_route(request: Request):
-        # WebSocket connection for real-time updates
-        global ws_client
-        # Close existing connection if any
-        if ws_client:
-            try:
-                ws_client.close()
-            except:
-                pass
-        ws_client = Websocket(request)
-        log_action("WebSocket client connected")
-        print("WebSocket client connected")
-        return ws_client
+    @server.route("/status")
+    def status_route(request: Request):
+        # HTTP endpoint for status polling (replaces WebSocket)
+        status = getStatusDict()
+        return Response(request, body=json.dumps(status), content_type="application/json")
 
     return server
 
@@ -2114,17 +2033,9 @@ def scanForAP(ssid, max_attempts=3):
 #%%----------------------------------------------------------------------------
 def teardownNetwork():
     # Cleanly tear down network stack for recovery.
-    global server, ws_client, wifi_healthy, server_healthy
+    global server, wifi_healthy, server_healthy
 
     print("Tearing down network stack...")
-
-    # Close WebSocket if open
-    if ws_client:
-        try:
-            ws_client.close()
-        except:
-            pass
-        ws_client = None
 
     # Stop server (if adafruit_httpserver supports it)
     if server:
@@ -2497,9 +2408,6 @@ while True:
     secTest = t.tm_sec
     if secOld != secTest:
         screenUpdate()
-        handleWebSocket()  # Check for WebSocket commands
-        if secTest % 5 == 0:  # Send WebSocket status every 5 seconds
-            sendWebSocketStatus()
         secOld = secTest
 
     # Perform Mech Update Every Minute
