@@ -1977,15 +1977,11 @@ def setupWebServer(pool):
         hrUpdate(forceHour=True)
         return Response(request, body='{"ok":true}', content_type="application/json")
 
-    @server.route("/sync_wifi", POST)
-    def sync_wifi_route(request: Request):
-        global last_wifi_sync_time
-        log_action("WiFi sync triggered via web")
-        result = getWifiTime()
-        if not result["wifiError"]:
-            t = rtc.datetime
-            last_wifi_sync_time = "{:02}:{:02}:{:02}".format(t.tm_hour, t.tm_min, t.tm_sec)
-        return Response(request, body=json.dumps({"ok": not result["wifiError"]}), content_type="application/json")
+    @server.route("/sync_ntp_time", POST)
+    def sync_ntp_time_route(request: Request):
+        log_action("NTP sync triggered via web")
+        success = retryNtpSync()
+        return Response(request, body=json.dumps({"ok": success}), content_type="application/json")
 
     @server.route("/get_timezone")
     def get_timezone_route(request: Request):
