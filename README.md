@@ -287,11 +287,9 @@ The IP address is shown on the OLED display and printed to the serial console.
 | `/anim/chaos` | POST | Run random chaos animation |
 | `/anim/sync` | POST | Run synchronized dance animation |
 | `/home` | POST | Home motor, pause 2s at 12 o'clock, return to time |
-| `/calibrate` | POST | Home motor and stay at 12 o'clock for calibration |
-| `/nudge_cw` | POST | Move hand 1 step clockwise |
-| `/nudge_ccw` | POST | Move hand 1 step counter-clockwise |
-| `/set_home` | POST | Save current position as home offset (persists to NVM) |
-| `/reset_calibration` | POST | Reset home offset to zero |
+| `/cal_start` | POST | Enter calibration mode (disable motor for manual positioning) |
+| `/cal_save` | POST | Save current AS5600 angle as 12 o'clock (persists to NVM) |
+| `/cal_cancel` | POST | Exit calibration mode without saving |
 | `/get_speed` | GET | Get current step delay in microseconds |
 | `/set_speed` | POST | Set step delay (100-1000 μs, persists to NVM) |
 
@@ -503,22 +501,14 @@ If the minute hand doesn't align exactly at 12 o'clock after homing, you can cal
 
 This method saves the AS5600 absolute angle for 12 o'clock. On subsequent startups, this saved calibration is used instead of recapturing the AS5600 angle during `findExactHome()`.
 
-### Web UI Calibration (Step Offset)
+### Web UI Calibration (AS5600)
 
-1. Click **Calibrate** - homes the motor and stays at 12 o'clock position
-2. Use **+ CW** / **- CCW** buttons to nudge the hand until it points exactly at 12
-3. Click **Set Home** - saves the offset to NVM (persists across reboots)
+1. Click **Calibrate AS5600** - motor disables, allowing manual positioning
+2. Manually rotate the minute hand to point exactly at 12 o'clock
+3. Click **Save Position** - saves AS5600 angle to NVM, hand moves to current minute
+4. Or click **Cancel** to abort without saving
 
-The step offset (range: ±1056 steps, ~30 degrees) is automatically applied after every homing operation. Click **Reset** to clear the offset back to zero.
-
-### Which Method to Use?
-
-| Method | Best For | Stored In |
-|--------|----------|-----------|
-| **Button C** | Quick setup, AS5600 installed | NVM bytes 6-7 (AS5600 angle) |
-| **Web UI** | Fine-tuning, no AS5600 | NVM bytes 2-3 (step offset) |
-
-Both methods persist across power cycles. The button method is faster but requires an AS5600 sensor.
+Both button and web UI methods now use the same AS5600-based calibration flow and store the angle in NVM bytes 6-7. The calibration persists across power cycles and overrides the automatic AS5600 capture during `findExactHome()`.
 
 ## Motor Speed Configuration
 
