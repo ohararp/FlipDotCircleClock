@@ -1028,6 +1028,7 @@ def findExactHome(delay=None, apply_offset=True, skip_as5600_capture=False):
     if delay is None:
         delay = STEP_DELAY
     print('Finding Exact Home')
+    ucStatus.text = "Finding Home..."
     en.value = motorEnabled
 
     global stepNow
@@ -1035,6 +1036,7 @@ def findExactHome(delay=None, apply_offset=True, skip_as5600_capture=False):
 
     # Step 1: Move forward until hall triggers (enter magnet zone)
     print('Step 1: Finding magnet zone')
+    ucStatus.text = "Home: Magnet..."
     step_count = 0
     while not hallStable(False):
         oneStep(1, delay)
@@ -1044,6 +1046,7 @@ def findExactHome(delay=None, apply_offset=True, skip_as5600_capture=False):
 
     # Step 2: Reverse until hall releases (precise edge A)
     print('Step 2: Finding edge A (release point)')
+    ucStatus.text = "Home: Edge A..."
     step_count = 0
     while not hallStable(True):
         oneStep(0, delay)
@@ -1055,6 +1058,7 @@ def findExactHome(delay=None, apply_offset=True, skip_as5600_capture=False):
 
     # Step 3: Continue reversing until hall triggers (other side of magnet)
     print('Step 3: Passing through to other side')
+    ucStatus.text = "Home: Crossing..."
     step_count = 0
     while not hallStable(False):
         oneStep(0, delay)
@@ -1064,6 +1068,7 @@ def findExactHome(delay=None, apply_offset=True, skip_as5600_capture=False):
 
     # Step 4: Reverse again (forward) until hall releases (precise edge B)
     print('Step 4: Finding edge B (release point)')
+    ucStatus.text = "Home: Edge B..."
     step_count = 0
     while not hallStable(True):
         oneStep(1, delay)
@@ -1098,6 +1103,7 @@ def findExactHome(delay=None, apply_offset=True, skip_as5600_capture=False):
 
     print('Magnet width: %d steps' % magnet_width)
     print('Center at: %d, moving %d steps' % (center, steps_to_center))
+    ucStatus.text = "Home: Centering..."
 
     if steps_to_center > 0:
         for _ in range(steps_to_center):
@@ -1109,6 +1115,7 @@ def findExactHome(delay=None, apply_offset=True, skip_as5600_capture=False):
     # Step 6: Set home position
     stepNow = 0
     print('Home set at center of magnet')
+    ucStatus.text = "Home Found"
 
     # Step 7: Apply calibration offset from NVM (unless in calibration mode)
     if apply_offset:
@@ -1300,6 +1307,7 @@ def hrUpdate(forceHour=False):
     hr12 = hour24ToHour12(t.tm_hour)
 
     if forceHour or (lastHourShown != hr12):
+        ucStatus.text = "Updating Hour..."
         flipsPower(True)
         try:
             setFlips([0, 0, 0, 0], 1, managePower=False)   # force black
@@ -1319,6 +1327,7 @@ def hrUpdate(forceHour=False):
 #%%----------------------------------------------------------------------------
 def anim_demo():
     # Full demo: sweep hand 360°, count through hours, restore time
+    ucStatus.text = "Anim: Demo"
     flipsPower(True)
     try:
         # Sweep minute hand full rotation
@@ -1339,6 +1348,7 @@ def anim_demo():
 
 def anim_chase():
     # Chase pattern: flipdots ripple, hand follows
+    ucStatus.text = "Anim: Chase"
     flipsPower(True)
     try:
         goHome()  # Start at 12
@@ -1361,6 +1371,7 @@ def anim_chase():
 
 def anim_chaos():
     # Random chaos: random flipdots, oscillating hand
+    ucStatus.text = "Anim: Chaos"
     flipsPower(True)
     try:
         for _ in range(20):
@@ -1377,6 +1388,7 @@ def anim_chaos():
 
 def anim_sync():
     # Sync dance: hand sweeps to each hour, flipdots light up in sync
+    ucStatus.text = "Anim: Sync"
     flipsPower(True)
     try:
         setFlips([0, 0, 0, 0], 1, managePower=False)  # Start blank
@@ -2241,6 +2253,7 @@ def recoverNetwork(max_wifi_attempts=3, wifi_timeout=15):
     global server, wifi_state, last_successful_poll, poll_failure_count
 
     print("Starting network recovery...")
+    ucStatus.text = "Network Recovery"
     set_wifi_state(WIFI_CONNECTING)
     setDotstar(PURPLE, 0.25)
     wifiCircle.fill = None
@@ -2379,6 +2392,7 @@ def recoverNetwork(max_wifi_attempts=3, wifi_timeout=15):
     wifiCircle.fill = 0xFFFFFF
     wifiStatus.text = ssid
     wifiAddress.text = str(wifi.radio.ipv4_address)
+    ucStatus.text = "WiFi Recovered"
     setDotstar(GREEN, 0.25)
     log_action("Network recovered: " + str(wifi.radio.ipv4_address))
 
@@ -2628,6 +2642,7 @@ while True:
                 # Long press - WiFi reconnect
                 is_long_press = True
                 print("Button A - Long press, attempting WiFi reconnect...")
+                ucStatus.text = "WiFi Reconnect..."
                 recoverNetwork()  # Will set state to CONNECTING then CONNECTED/OFFLINE
                 # Wait for button release
                 while butA.value == 0:
@@ -2638,6 +2653,7 @@ while True:
         if not is_long_press:
             # Short press - original behavior
             print("Button A - Short press, re-homing")
+            ucStatus.text = "Re-homing..."
             blankDisplay()        # Clear display before re-animating hour
 
             t = rtc.datetime
