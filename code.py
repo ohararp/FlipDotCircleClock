@@ -1342,7 +1342,6 @@ def anim_demo():
     finally:
         extendFlipPowerWindow()
     # Restore time
-    goHome()
     hrUpdate(forceHour=True)
     minUpdate()
 
@@ -1358,7 +1357,7 @@ def anim_chaos():
 
     flipsPower(True)
     try:
-        for _ in range(20):
+        for h in range(1, 13):
             # Pick random hour 1-12 (0 = 12 o'clock position)
             hour = r.randint(1, 12)
             target_pos = (hour % 12) * steps_per_hour  # hour 12 -> pos 0
@@ -1953,7 +1952,7 @@ def setupWebServer(pool):
         t = rtc.datetime
         numIn = hour24ToHour12(t.tm_hour)
         roundTo(numIn)                        # Animate flipdots to current hour
-        findExactHome()               # Re-home minute hand
+        goHome()                       # Re-home minute hand
         hrUpdate(forceHour=True)              # Force hour refresh
         minUpdate()                           # Sync minute hand
         return Response(request, body='{"ok":true}', content_type="application/json")
