@@ -1303,11 +1303,11 @@ def anim_demo():
         # Count through hours 1-12
         for h in range(1, 13):
             ucStatus.text = "Demo %d/12" % h
-            setFlips(hourIn(h), 1, managePower=False)
-            time.sleep(0.5)
+            setFlips(hourIn(h), 1, managePower=True)
+            time.sleep(1.5)
         # Blank
-        setFlips([0, 0, 0, 0], 1, managePower=False)
-        time.sleep(0.5)
+        setFlips([0, 0, 0, 0], 1, managePower=True)
+        time.sleep(1.0)
     finally:
         extendFlipPowerWindow()
     # Restore time
@@ -1332,7 +1332,7 @@ def anim_chaos():
             target_pos = (hour % 12) * steps_per_hour  # hour 12 -> pos 0
 
             # Display hour on flipdots
-            setFlips(hourIn(hour), 1, managePower=False)
+            setFlips(hourIn(hour), 1, managePower=True)
 
             # Calculate CW-only movement (like minUpdate)
             if target_pos >= current_pos:
@@ -1345,7 +1345,7 @@ def anim_chaos():
                 multiStep(1, steps_needed, STEP_DELAY)  # CW only
                 current_pos = target_pos
 
-            time.sleep(0.25)
+            time.sleep(1.5)
     finally:
         extendFlipPowerWindow()
 
@@ -1358,7 +1358,7 @@ def anim_sync():
     # Sync dance: hand sweeps to each hour, flipdots light up in sync
     flipsPower(True)
     try:
-        setFlips([0, 0, 0, 0], 1, managePower=False)  # Start blank
+        setFlips([0, 0, 0, 0], 1, managePower=True)  # Start blank
         goHome()  # Start at 12
         steps_per_hour = STEPS // 12
         for h in range(1, 13):
@@ -1366,8 +1366,8 @@ def anim_sync():
             # Move hand to hour position
             multiStep(1, steps_per_hour, STEP_DELAY)
             # Light up matching hour
-            setFlips(hourIn(h), 1, managePower=False)
-            time.sleep(0.375)
+            setFlips(hourIn(h), 1, managePower=True)
+            time.sleep(1.5)
     finally:
         extendFlipPowerWindow()
     # Restore time
