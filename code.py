@@ -135,6 +135,7 @@ as5600_home_offset = 0  # AS5600 raw value at 12 o'clock - auto-detected after h
 
 # Calibration tracking (for interactive calibration via web UI)
 calibration_steps = 0  # Tracks nudges during calibration session
+calibration_mode = False  # True when in button calibration mode (Button C long-press)
  
 # Stepper Motor Setup
 motorEnabled  = False   # active-low
@@ -278,7 +279,12 @@ def get_uptime():
 # NVM[3] = home offset low byte
 # NVM[4] = step delay high byte (16-bit, microseconds, 100-1000 range)
 # NVM[5] = step delay low byte
+# NVM[6] = AS5600 calibration high byte (0-4095, or 0xFFFF = uncalibrated)
+# NVM[7] = AS5600 calibration low byte
 NVM_MAGIC = 0xAB
+NVM_AS5600_CAL_HIGH = 6
+NVM_AS5600_CAL_LOW = 7
+AS5600_CAL_UNCALIBRATED = 0xFFFF
 DEFAULT_STEP_DELAY_US = 450  # Default 450 microseconds (0.00045 seconds)
 #%%----------------------------------------------------------------------------
 def load_timezone_nvm():
@@ -349,6 +355,41 @@ def save_home_offset_nvm(offset):
         return False
 
 #%%----------------------------------------------------------------------------
+def load_as5600_cal_nvm():
+    # Load AS5600 calibration angle from NVM bytes 6-7.
+    # Returns 0-4095 if calibrated, or None if uncalibrated/invalid.
+    try:
+        if microcontroller.nvm[0] != NVM_MAGIC:
+            return None
+        high = microcontroller.nvm[NVM_AS5600_CAL_HIGH]
+        low = microcontroller.nvm[NVM_AS5600_CAL_LOW]
+        value = (high << 8) | low
+        if value == AS5600_CAL_UNCALIBRATED or value > 4095:
+            return None
+        return value
+    except:
+        return None
+
+#%%----------------------------------------------------------------------------
+def save_as5600_cal_nvm(angle):
+    # Save AS5600 calibration angle to NVM bytes 6-7. Pass None to clear.
+    try:
+        microcontroller.nvm[0] = NVM_MAGIC
+        if angle is None:
+            microcontroller.nvm[NVM_AS5600_CAL_HIGH] = 0xFF
+            microcontroller.nvm[NVM_AS5600_CAL_LOW] = 0xFF
+            print("AS5600 calibration cleared from NVM")
+        else:
+            angle = angle % 4096
+            microcontroller.nvm[NVM_AS5600_CAL_HIGH] = (angle >> 8) & 0xFF
+            microcontroller.nvm[NVM_AS5600_CAL_LOW] = angle & 0xFF
+            print("AS5600 calibration saved to NVM: %d" % angle)
+        return True
+    except Exception as e:
+        print("NVM AS5600 cal write error:", e)
+        return False
+
+#%%----------------------------------------------------------------------------
 def load_step_delay_nvm():
     # Load step delay from NVM bytes 4-5. Returns delay in seconds (float).
     # Stored as microseconds (100-1000 range). Returns default if not set.
@@ -383,6 +424,44 @@ def save_step_delay_nvm(delay_us):
     except Exception as e:
         print("NVM step delay write error:", e)
         return False
+
+#%%----------------------------------------------------------------------------
+def enter_calibration_mode():
+    # Enter AS5600 calibration mode - disable motor for manual positioning.
+    global calibration_mode
+    calibration_mode = True
+    en.value = motorDisabled  # Power down motor so user can move hand
+    ucStatus.text = "CAL: Move to 12"
+    print("Calibration mode: Move hand to 12 o'clock, then hold C")
+
+#%%----------------------------------------------------------------------------
+def confirm_calibration():
+    # Confirm calibration - save current AS5600 position as 12 o'clock to NVM.
+    global calibration_mode, as5600_home_offset, stepNow
+
+    if as5600_sensor and as5600_sensor.magnet_detected:
+        # Read current AS5600 angle - this becomes the new 12 o'clock reference
+        angle = read_as5600_angle()
+        if angle is not None:
+            as5600_home_offset = angle
+            save_as5600_cal_nvm(angle)
+            ucStatus.text = "CAL: Saved!"
+            print("AS5600 home offset set to: %d" % angle)
+        else:
+            ucStatus.text = "CAL: Read fail!"
+            print("Calibration failed: Could not read AS5600")
+    else:
+        ucStatus.text = "CAL: No magnet!"
+        print("Calibration failed: AS5600 magnet not detected")
+
+    time.sleep(1)
+    calibration_mode = False
+    en.value = motorEnabled
+    ucStatus.text = ""
+    stepNow = 0  # At 12 o'clock = step 0
+
+    # Move to current minute position
+    minUpdate()
 
 #%%----------------------------------------------------------------------------
 # DST Calculation Functions
@@ -941,11 +1020,12 @@ def moveToAngle(target_raw, tolerance=15, max_steps=1000):
         return False
 
 #%%----------------------------------------------------------------------------
-def findExactHome(delay=None, apply_offset=True):
+def findExactHome(delay=None, apply_offset=True, skip_as5600_capture=False):
     # Find magnet center using symmetric edge detection.
     # Both edges detected at release point for consistency.
     # delay: step delay in seconds, defaults to STEP_DELAY
     # apply_offset: if True, apply stored NVM offset after finding center
+    # skip_as5600_capture: if True, don't overwrite as5600_home_offset (use saved NVM cal)
     if delay is None:
         delay = STEP_DELAY
     print('Finding Exact Home')
@@ -1045,15 +1125,18 @@ def findExactHome(delay=None, apply_offset=True):
     else:
         print('Calibration mode: staying at raw magnet center')
 
-    # Step 8: Record AS5600 angle at 12 o'clock for closed-loop reference
-    global as5600_home_offset
-    if as5600_sensor:
-        try:
-            as5600_home_offset = as5600_sensor.angle
-            print(f'AS5600 at home (12:00): {as5600_home_offset} ({as5600_home_offset * 360.0 / 4096.0:.1f} deg)')
-        except Exception as e:
-            print(f'AS5600 read error at home: {e}')
-            as5600_home_offset = 0
+    # Step 8: Record AS5600 angle at 12 o'clock (unless using saved calibration)
+    if not skip_as5600_capture:
+        global as5600_home_offset
+        if as5600_sensor:
+            try:
+                as5600_home_offset = as5600_sensor.angle
+                print(f'AS5600 at home (12:00): {as5600_home_offset} ({as5600_home_offset * 360.0 / 4096.0:.1f} deg)')
+            except Exception as e:
+                print(f'AS5600 read error at home: {e}')
+                as5600_home_offset = 0
+    else:
+        print('Skipping AS5600 capture (using saved calibration)')
 
     return magnet_width
 
@@ -1156,7 +1239,9 @@ def screenUpdate():
     t = rtc.datetime
     timeArea.text = "{:02}:{:02}:{:02}".format(t.tm_hour, t.tm_min, t.tm_sec)
     print(timeArea.text)
-    ucStatus.text = " "
+    # Don't clear status during calibration mode
+    if not calibration_mode:
+        ucStatus.text = " "
     led.value = not led.value
 
 #%%----------------------------------------------------------------------------
@@ -2386,7 +2471,16 @@ ucStatus.text = "Magnet Offset"
 time.sleep(1.0)
 multiStep(1, r.randint(125, STEPS), STEP_DELAY)
 time.sleep(0.25)
-findExactHome()
+
+# Check for saved AS5600 calibration (overrides findExactHome AS5600 capture)
+saved_cal = load_as5600_cal_nvm()
+if saved_cal is not None:
+    as5600_home_offset = saved_cal
+    print("Using saved AS5600 calibration: %d" % saved_cal)
+    findExactHome(skip_as5600_capture=True)  # Home to hall sensor but keep saved cal
+else:
+    print("No AS5600 calibration - using findExactHome")
+    findExactHome()
 
 # Debug: show AS5600 home offset
 print(f"DEBUG: as5600_home_offset = {as5600_home_offset}")
@@ -2601,9 +2695,40 @@ while True:
         didManualUpdate = True
 
     elif butC.value == 0:
-        setMins()             # Increment RTC minute
-        minUpdate()           # Sync minute hand
-        didManualUpdate = True
+        # Track press start time for long-press detection
+        press_start = time.monotonic()
+        is_long_press = False
+
+        # Wait for release or long-press threshold
+        while butC.value == 0:
+            held_time = time.monotonic() - press_start
+            if held_time >= LONG_PRESS_THRESHOLD:
+                is_long_press = True
+                if calibration_mode:
+                    # Already in calibration - confirm and save
+                    print("Button C - Long press, confirming calibration...")
+                    confirm_calibration()
+                else:
+                    # Enter calibration mode
+                    print("Button C - Long press, entering calibration...")
+                    enter_calibration_mode()
+                # Wait for button release
+                while butC.value == 0:
+                    time.sleep(0.05)
+                break
+            time.sleep(0.05)
+
+        if not is_long_press:
+            if calibration_mode:
+                # In calibration mode, short press shows reminder
+                ucStatus.text = "Hold C to save"
+                time.sleep(0.5)
+                ucStatus.text = "CAL: Move to 12"
+            else:
+                # Normal short press - increment minute
+                setMins()
+                minUpdate()
+                didManualUpdate = True
 
     else:
         serviceFlipPowerWindow()  # Handle delayed flipdot power-off
