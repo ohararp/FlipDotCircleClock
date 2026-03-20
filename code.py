@@ -947,11 +947,8 @@ def getStatusDict():
 def multiStep(data, steps, delay):
     # Step motor multiple times with enable control.
     en.value = motorEnabled
-    poll_interval = 100  # Poll server every N steps
-    for i in range(steps):
+    for _ in range(steps):
         oneStep(data, delay)
-        # if i % poll_interval == 0:
-        #     pollServer()
 
 #%%----------------------------------------------------------------------------
 def moveToAngle(target_raw, tolerance=15, max_steps=1000):
@@ -1008,10 +1005,6 @@ def moveToAngle(target_raw, tolerance=15, max_steps=1000):
                 if steps_taken >= max_steps:
                     break
 
-            # Poll server occasionally to keep web responsive
-            # if steps_taken % 100 == 0:
-            #     pollServer()
-
         print(f"moveToAngle: max_steps exceeded, diff={diff}")
         return False
     except Exception as e:
@@ -1041,8 +1034,6 @@ def findExactHome(delay=None, apply_offset=True, skip_as5600_capture=False):
     while not hallStable(False):
         oneStep(1, delay)
         step_count += 1
-        # if step_count % 100 == 0:
-        #     pollServer()
 
     # Step 2: Reverse until hall releases (precise edge A)
     print('Step 2: Finding edge A (release point)')
@@ -1051,8 +1042,6 @@ def findExactHome(delay=None, apply_offset=True, skip_as5600_capture=False):
     while not hallStable(True):
         oneStep(0, delay)
         step_count += 1
-    #     if step_count % 100 == 0:
-    #         pollServer()
     edge_a = stepNow
     print('Edge A at step: %d' % edge_a)
 
@@ -1063,8 +1052,6 @@ def findExactHome(delay=None, apply_offset=True, skip_as5600_capture=False):
     while not hallStable(False):
         oneStep(0, delay)
         step_count += 1
-        # if step_count % 100 == 0:
-        #     pollServer()
 
     # Step 4: Reverse again (forward) until hall releases (precise edge B)
     print('Step 4: Finding edge B (release point)')
@@ -1073,8 +1060,6 @@ def findExactHome(delay=None, apply_offset=True, skip_as5600_capture=False):
     while not hallStable(True):
         oneStep(1, delay)
         step_count += 1
-        # if step_count % 100 == 0:
-        #     pollServer()
     edge_b = stepNow
     print('Edge B at step: %d' % edge_b)
 
@@ -1179,9 +1164,6 @@ def goHome(tolerance=15):
 
     print("goHome: AS5600=%d, home=%d, moving %d steps CW" % (current, target, cw_steps))
     multiStep(1, cw_steps, STEP_DELAY)
-
-    # Fine-tune with AS5600 closed-loop
-    #moveToAngle(target, tolerance)
 
     stepNow = 0
     print("goHome: At home")
