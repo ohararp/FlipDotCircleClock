@@ -1346,42 +1346,42 @@ def anim_demo():
     hrUpdate(forceHour=True)
     minUpdate()
 
-def anim_chase():
-    # Chase pattern: flipdots ripple, hand follows
-    ucStatus.text = "Anim: Chase"
-    flipsPower(True)
-    try:
-        goHome()  # Start at 12
-        steps_per_hour = STEPS // 12
-        for h in range(1, 13):
-            # Move hand to hour position
-            multiStep(1, steps_per_hour, STEP_DELAY)
-            # Light up matching hour
-            setFlips(hourIn(h), 1, managePower=False)
-            time.sleep(0.375)
-        # Blank at end
-        setFlips([0, 0, 0, 0], 1, managePower=False)
-        time.sleep(0.1)
-    finally:
-        extendFlipPowerWindow()
-    # Restore time
-    goHome()
-    hrUpdate(forceHour=True)
-    minUpdate()
-
 def anim_chaos():
-    # Random chaos: random flipdots, oscillating hand
+    # Random chaos: random flipdots with minute hand pointing to displayed hour
     ucStatus.text = "Anim: Chaos"
+    global stepNow
+
+    # Start at home position (12 o'clock)
+    goHome()
+    current_pos = 0  # stepNow is 0 at 12 o'clock
+    steps_per_hour = STEPS // 12  # ~1067 steps per hour position
+
     flipsPower(True)
     try:
         for _ in range(20):
-            setFlips(hourIn(r.randint(0, 12)), 1, managePower=False)
-            # Oscillate hand randomly
-            multiStep(r.choice([0, 1]), r.randint(20, 100), STEP_DELAY)
+            # Pick random hour 1-12 (0 = 12 o'clock position)
+            hour = r.randint(1, 12)
+            target_pos = (hour % 12) * steps_per_hour  # hour 12 -> pos 0
+
+            # Display hour on flipdots
+            setFlips(hourIn(hour), 1, managePower=False)
+
+            # Calculate CW-only movement (like minUpdate)
+            if target_pos >= current_pos:
+                steps_needed = target_pos - current_pos
+            else:
+                steps_needed = (STEPS - current_pos) + target_pos
+
+            # Move to target position
+            if steps_needed > 0:
+                multiStep(1, steps_needed, STEP_DELAY)  # CW only
+                current_pos = target_pos
+
             time.sleep(0.25)
     finally:
         extendFlipPowerWindow()
-    # Restore time
+
+    # Restore time display
     goHome()
     hrUpdate(forceHour=True)
     minUpdate()
@@ -1403,7 +1403,6 @@ def anim_sync():
     finally:
         extendFlipPowerWindow()
     # Restore time
-    goHome()
     hrUpdate(forceHour=True)
     minUpdate()
 
@@ -1539,6 +1538,7 @@ def getWifiTime():
         try:
             wifiStatus.text = "Try %d/%d" % (attempt + 1, wifi_connect_attempts)
             if attempt > 0:
+                ucStatus.text = "WiFi Retry %d" % (attempt + 1)
                 print("WiFi retry attempt %d of %d" % (attempt + 1, wifi_connect_attempts))
             wifi.radio.connect(ssid, password, timeout=15)
             # Verify connection actually succeeded
@@ -1568,9 +1568,11 @@ def getWifiTime():
         return result
 
     # Wait for DHCP to assign IP address (up to 15 seconds)
+    ucStatus.text = "DHCP Wait..."
     print("Waiting for DHCP...")
     for i in range(30):
         if wifi.radio.ipv4_address is not None:
+            ucStatus.text = "DHCP OK"
             print("DHCP assigned IP after %d iterations" % i)
             break
         time.sleep(0.5)
@@ -2070,12 +2072,6 @@ def setupWebServer(pool):
         anim_demo()
         return Response(request, body='{"ok":true}', content_type="application/json")
 
-    @server.route("/anim/chase", POST)
-    def anim_chase_route(request: Request):
-        log_action("Animation: Chase pattern")
-        anim_chase()
-        return Response(request, body='{"ok":true}', content_type="application/json")
-
     @server.route("/anim/chaos", POST)
     def anim_chaos_route(request: Request):
         log_action("Animation: Random chaos")
@@ -2189,16 +2185,19 @@ def sleepWithUpdates(seconds):
 def scanForAP(ssid, max_attempts=3):
     """Scan for WiFi AP and return True if found with RSSI."""
     for attempt in range(max_attempts):
+        ucStatus.text = "WiFi Scan %d" % (attempt + 1)
         print("Scanning for WiFi networks (attempt %d/%d)..." % (attempt + 1, max_attempts))
         try:
             found_networks = []
             for network in wifi.radio.start_scanning_networks():
                 found_networks.append((network.ssid, network.rssi))
                 if network.ssid == ssid:
+                    ucStatus.text = "AP Found"
                     print("  Found %s (RSSI: %d dBm)" % (ssid, network.rssi))
                     wifi.radio.stop_scanning_networks()
                     return True, network.rssi
             wifi.radio.stop_scanning_networks()
+            ucStatus.text = "AP Not Found"
             print("  Scanned %d networks, %s not found" % (len(found_networks), ssid))
             if found_networks:
                 print("  Visible: %s" % ", ".join(n[0] for n in found_networks[:5]))
@@ -2217,6 +2216,7 @@ def teardownNetwork():
     # Cleanly tear down network stack for recovery.
     global server, wifi_state
 
+    ucStatus.text = "Net Teardown..."
     print("Tearing down network stack...")
 
     # Stop server (if adafruit_httpserver supports it)
@@ -2235,16 +2235,20 @@ def teardownNetwork():
 
     # Try to reset WiFi radio by disabling/enabling with longer delays
     try:
+        ucStatus.text = "WiFi Reset..."
         print("Resetting WiFi radio (this takes ~15s)...")
         wifi.radio.enabled = False
         sleepWithUpdates(5)   # 5 seconds disabled to fully reset
         wifi.radio.enabled = True
         sleepWithUpdates(10)  # 10 seconds for radio to fully initialize
+        ucStatus.text = "WiFi Reset OK"
         print("WiFi radio reset complete")
     except Exception as e:
+        ucStatus.text = "WiFi Reset Err"
         print("WiFi radio reset error: %s" % e)
 
     set_wifi_state(WIFI_DISCONNECTED)
+    ucStatus.text = "Net Down"
     print("Network stack torn down")
 
 #%%----------------------------------------------------------------------------
@@ -2269,10 +2273,12 @@ def recoverNetwork(max_wifi_attempts=3, wifi_timeout=15):
 
     # Check if WiFi is actually still connected before tearing down
     if wifi.radio.connected and wifi.radio.ipv4_address:
+        ucStatus.text = "WiFi OK"
         print("WiFi still connected (%s), skipping teardown - just restarting server" % wifi.radio.ipv4_address)
         # Will set WIFI_CONNECTED after server restart
     else:
         # Step 1: Tear down existing connections
+        ucStatus.text = "Full Teardown"
         print("WiFi not connected, performing full teardown...")
         teardownNetwork()
 
@@ -2289,6 +2295,7 @@ def recoverNetwork(max_wifi_attempts=3, wifi_timeout=15):
         wifiStatus.text = "Scanning..."
         ap_found, rssi = scanForAP(ssid)
         if not ap_found:
+            ucStatus.text = "AP Not Found"
             print("AP %s not visible after scanning - may be out of range" % ssid)
             wifiStatus.text = "AP Not Found"
             setDotstar(YELLOW, 0.25)
@@ -2299,10 +2306,12 @@ def recoverNetwork(max_wifi_attempts=3, wifi_timeout=15):
             nvm[NVM_WIFI_RESET_MARKER] = WIFI_RESET_MARKER
             print("WiFi reset counter: %d -> %d" % (current_count, current_count + 1))
             # Stay in offline mode instead of resetting
+            ucStatus.text = "Offline Mode"
             print("Staying in offline mode (AP not found)")
             set_wifi_state(WIFI_OFFLINE)
             return False
 
+        ucStatus.text = "AP Found"
         print("AP %s found (RSSI: %d dBm), proceeding with connection..." % (ssid, rssi))
         wifiStatus.text = "Connecting..."
 
@@ -2316,6 +2325,7 @@ def recoverNetwork(max_wifi_attempts=3, wifi_timeout=15):
                 wifiStatus.text = "Retry in %ds" % backoff
                 sleepWithUpdates(backoff)
 
+            ucStatus.text = "Connect %d/%d" % (attempt + 1, max_wifi_attempts)
             print("WiFi connect attempt %d/%d..." % (attempt + 1, max_wifi_attempts))
             print("  Radio state: enabled=%s, connected=%s" % (wifi.radio.enabled, wifi.radio.connected))
 
@@ -2325,14 +2335,17 @@ def recoverNetwork(max_wifi_attempts=3, wifi_timeout=15):
                 time.sleep(1)  # Give radio time to settle
                 if wifi.radio.connected:
                     wifi_connected = True
+                    ucStatus.text = "Connected!"
                     print("WiFi connect succeeded, connected=%s, ip=%s" % (wifi.radio.connected, wifi.radio.ipv4_address))
                     break
                 else:
+                    ucStatus.text = "Not Connected"
                     print("WiFi connect returned but not connected (attempt %d)" % (attempt + 1))
             except Exception as e:
                 print("WiFi attempt %d exception: %s" % (attempt + 1, e))
 
         if not wifi_connected:
+            ucStatus.text = "WiFi Failed"
             print("WiFi recovery failed after %d attempts" % max_wifi_attempts)
             wifiStatus.text = "WiFi Failed"
             setDotstar(YELLOW, 0.25)
@@ -2343,20 +2356,24 @@ def recoverNetwork(max_wifi_attempts=3, wifi_timeout=15):
             nvm[NVM_WIFI_RESET_MARKER] = WIFI_RESET_MARKER
             print("WiFi reset counter: %d -> %d" % (current_count, current_count + 1))
             # Stay in offline mode instead of resetting
+            ucStatus.text = "Offline Mode"
             print("Staying in offline mode (connect failed)")
             set_wifi_state(WIFI_OFFLINE)
             return False
 
         # Step 3: Wait for DHCP (up to 15 seconds)
+        ucStatus.text = "DHCP Wait..."
         print("Waiting for DHCP...")
         for i in range(30):  # 30 × 0.5s = 15 seconds
             ip = wifi.radio.ipv4_address
             if ip:
+                ucStatus.text = "DHCP OK"
                 print("DHCP assigned IP after %d iterations: %s" % (i, ip))
                 break
             time.sleep(0.5)
 
         if not wifi.radio.ipv4_address:
+            ucStatus.text = "No IP"
             print("No IP address assigned after 15s")
             wifiStatus.text = "No IP"
             setDotstar(YELLOW, 0.25)
@@ -2373,14 +2390,17 @@ def recoverNetwork(max_wifi_attempts=3, wifi_timeout=15):
 
     # Step 4: Recreate socket pool and server
     try:
+        ucStatus.text = "Server Start"
         pool = socketpool.SocketPool(wifi.radio)
         server = setupWebServer(pool)
         clock_web_port = int(os.getenv("CLOCK_WEB_PORT", "80"))
         server.start("0.0.0.0", port=clock_web_port)
         last_successful_poll = time.monotonic()
         poll_failure_count = 0
+        ucStatus.text = "Server OK"
         print("Server recovered on port %d" % clock_web_port)
     except Exception as e:
+        ucStatus.text = "Server Fail"
         print("Server recovery failed: %s" % e)
         server = None
         set_wifi_state(WIFI_DISCONNECTED)
@@ -2412,6 +2432,7 @@ def checkNetworkHealth():
         time.sleep(0.5)
         wifi_ok = wifi.radio.connected and wifi.radio.ipv4_address is not None
         if not wifi_ok:
+            ucStatus.text = "WiFi Lost"
             print("Health check: WiFi disconnected (connected=%s, ip=%s)" % (
                 wifi.radio.connected, wifi.radio.ipv4_address))
             set_wifi_state(WIFI_DISCONNECTED)
@@ -2419,6 +2440,7 @@ def checkNetworkHealth():
 
     # Check 2: Server poll succeeding (if we have a server)
     if server and last_successful_poll > 0 and (now - last_successful_poll) > POLL_HEALTH_TIMEOUT:
+        ucStatus.text = "Poll Timeout"
         print("Health check: No successful poll in %ds" % POLL_HEALTH_TIMEOUT)
         set_wifi_state(WIFI_DISCONNECTED)
         return False
@@ -2604,16 +2626,20 @@ while True:
         # Offline mode: retry WiFi at top of hour
         if wifi_state == WIFI_OFFLINE and OFFLINE_RETRY_AT_TOP_OF_HOUR:
             if hrTest != last_wifi_retry_hour:
+                ucStatus.text = "Offline Retry"
                 print("Offline mode: top of hour, attempting WiFi reconnection...")
                 last_wifi_retry_hour = hrTest
                 if recoverNetwork():
+                    ucStatus.text = "WiFi Back!"
                     print("WiFi recovered from offline mode!")
                     log_action("WiFi recovered from offline")
                 else:
+                    ucStatus.text = "Retry Failed"
                     print("WiFi retry failed, will try again next hour")
 
         # Hourly NTP sync at top of hour (only if WiFi connected)
         if wifi.radio.connected:
+            ucStatus.text = "Hourly NTP..."
             print("Hourly NTP sync...")
             result = getWifiTime()
             ntp_has_error = result.get("ntpError", False)
@@ -2675,10 +2701,11 @@ while True:
         while butB.value == 0:
             held_time = time.monotonic() - press_start
             if held_time >= LONG_PRESS_THRESHOLD:
-                # Long press - test goHome()
+                # Long press - sync animation
                 is_long_press = True
-                print("Button B - Long press, testing goHome()...")
-                goHome()
+                ucStatus.text = "Sync Demo"
+                print("Button B - Long press, sync animation...")
+                anim_sync()
                 # Wait for button release
                 while butB.value == 0:
                     time.sleep(0.05)
@@ -2686,9 +2713,11 @@ while True:
             time.sleep(0.05)
 
         if not is_long_press:
-            # Short press - original behavior
-            setHrs()              # Increment RTC hour
-            hrUpdate(forceHour=True)  # Force hour refresh
+            # Short press - increment hour
+            ucStatus.text = "+1 Hour"
+            print("Button B - Short press, increment hour")
+            setHrs()
+            hrUpdate(forceHour=True)
         didManualUpdate = True
 
     elif butC.value == 0:

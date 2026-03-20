@@ -114,7 +114,6 @@
           </div>
           <div class="actions">
             <button id="animDemoBtn">Demo</button>
-            <button id="animChaseBtn">Chase</button>
             <button id="animChaosBtn">Chaos</button>
             <button id="animSyncBtn">Sync</button>
           </div>
@@ -248,7 +247,6 @@
   document.getElementById('minPlusBtn').addEventListener('click',function(){postAction('/set_min');});
   document.getElementById('resetNtpBtn').addEventListener('click',function(){postAction('/sync_wifi');});
   document.getElementById('animDemoBtn').addEventListener('click',function(){postAction('/anim/demo');});
-  document.getElementById('animChaseBtn').addEventListener('click',function(){postAction('/anim/chase');});
   document.getElementById('animChaosBtn').addEventListener('click',function(){postAction('/anim/chaos');});
   document.getElementById('animSyncBtn').addEventListener('click',function(){postAction('/anim/sync');});
   document.getElementById('homeBtn').addEventListener('click',function(){postAction('/home');});

@@ -254,7 +254,7 @@ The IP address is shown on the OLED display and printed to the serial console.
 - **Timezone Selector**: Dropdown to change timezone (18 worldwide options with DST support)
 - **Motor Status**: Current position, steps total, last hour shown, flipdot power state
 - **Control Buttons**: Reset to NTP, +1 Hour, +1 Minute, Wipe Display, Sync WiFi
-- **Animation Buttons**: Demo, Chase, Chaos, Sync (showcase flipdots and minute hand)
+- **Animation Buttons**: Demo, Chaos, Sync (showcase flipdots and minute hand)
 - **Action Log**: Timestamped history of actions
 - **Auto-refresh**: Status updates every 5 seconds
 
@@ -263,11 +263,8 @@ The IP address is shown on the OLED display and printed to the serial console.
 | Animation | Description |
 |-----------|-------------|
 | **Demo** | Full 360° minute hand sweep, counts flipdots 1→12→blank, restores time |
-| **Chase** | Flipdots ripple 1→12 while minute hand follows along |
-| **Chaos** | Random flipdot patterns with oscillating hand movement |
+| **Chaos** | Random flipdot hours with minute hand pointing to displayed hour |
 | **Sync** | Hand sweeps to each hour position, flipdots light up in sync |
-
-> **Note:** All demo patterns need to be reviewed and may require updates.
 
 ### API Endpoints
 
@@ -283,9 +280,8 @@ The IP address is shown on the OLED display and printed to the serial console.
 | `/set_min` | POST | Increment minute by 1 |
 | `/sync_wifi` | POST | Trigger WiFi time sync |
 | `/anim/demo` | POST | Run demo animation sequence |
-| `/anim/chase` | POST | Run chase/wave animation |
-| `/anim/chaos` | POST | Run random chaos animation |
-| `/anim/sync` | POST | Run synchronized dance animation |
+| `/anim/chaos` | POST | Run chaos animation (hand points to random hours) |
+| `/anim/sync` | POST | Run synchronized animation (hand follows flipdots) |
 | `/home` | POST | Home motor, pause 2s at 12 o'clock, return to time |
 | `/cal_start` | POST | Enter calibration mode (disable motor for manual positioning) |
 | `/cal_save` | POST | Save current AS5600 angle as 12 o'clock (persists to NVM) |
@@ -339,7 +335,7 @@ Three momentary push buttons provide manual control without needing WiFi or the 
 - Power-on verification that all components are working
 - Manual WiFi recovery when in offline mode
 
-### Button B - Increment Hour / Test goHome (IO38)
+### Button B - Increment Hour / Sync Animation (IO38)
 
 **Short Press**: Adds 1 hour to the RTC time and updates the display
 
@@ -347,13 +343,13 @@ Three momentary push buttons provide manual control without needing WiFi or the 
 1. Increments the RTC hour by 1 (wraps from 23 to 0)
 2. Forces a flip dot display refresh to show the new hour
 
-**Long Press (2 seconds)**: Tests `goHome()` function - moves minute hand CW to 12 o'clock using AS5600 position
+**Long Press (2 seconds)**: Runs the Sync animation - minute hand sweeps to each hour position while flipdots light up in sync
 
 **Use Cases**:
 - Setting the time manually during initial setup
 - Adjusting for daylight saving time if automatic DST fails
 - Testing flip dot display operation
-- Testing AS5600-based homing without full hall sensor sweep
+- Demonstrating synchronized flipdot and motor movement
 
 **Note**: This modifies the battery-backed RTC, so the change persists across power cycles.
 
