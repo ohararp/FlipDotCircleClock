@@ -950,8 +950,8 @@ def multiStep(data, steps, delay):
     poll_interval = 100  # Poll server every N steps
     for i in range(steps):
         oneStep(data, delay)
-        if i % poll_interval == 0:
-            pollServer()
+        # if i % poll_interval == 0:
+        #     pollServer()
 
 #%%----------------------------------------------------------------------------
 def moveToAngle(target_raw, tolerance=15, max_steps=1000):
@@ -1009,8 +1009,8 @@ def moveToAngle(target_raw, tolerance=15, max_steps=1000):
                     break
 
             # Poll server occasionally to keep web responsive
-            if steps_taken % 100 == 0:
-                pollServer()
+            # if steps_taken % 100 == 0:
+            #     pollServer()
 
         print(f"moveToAngle: max_steps exceeded, diff={diff}")
         return False
