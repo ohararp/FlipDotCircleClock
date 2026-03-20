@@ -901,19 +901,6 @@ def oneStep(data, delay):
     hallTest()
 
 #%%----------------------------------------------------------------------------
-def pollServer():
-    # Poll web server if available to maintain responsiveness during long operations.
-    global server, last_successful_poll, poll_failure_count
-    if server:
-        try:
-            server.poll()
-            last_successful_poll = time.monotonic()
-            poll_failure_count = 0
-        except Exception as e:
-            print("Server poll error:", e)
-            poll_failure_count += 1
-
-#%%----------------------------------------------------------------------------
 def getStatusDict():
     # Build status dictionary for WebSocket/JSON responses.
     try:
