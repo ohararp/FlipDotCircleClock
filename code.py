@@ -1296,13 +1296,13 @@ def hrUpdate(forceHour=False):
 #%%----------------------------------------------------------------------------
 def anim_demo():
     # Full demo: sweep hand 360°, count through hours, restore time
-    ucStatus.text = "Anim: Demo"
     flipsPower(True)
     try:
         # Sweep minute hand full rotation
         goHome()
         # Count through hours 1-12
         for h in range(1, 13):
+            ucStatus.text = "Demo %d/12" % h
             setFlips(hourIn(h), 1, managePower=False)
             time.sleep(0.5)
         # Blank
@@ -1316,7 +1316,6 @@ def anim_demo():
 
 def anim_chaos():
     # Random chaos: random flipdots with minute hand pointing to displayed hour
-    ucStatus.text = "Anim: Chaos"
     global stepNow
 
     # Start at home position (12 o'clock)
@@ -1327,6 +1326,7 @@ def anim_chaos():
     flipsPower(True)
     try:
         for h in range(1, 13):
+            ucStatus.text = "Chaos %d/12" % h
             # Pick random hour 1-12 (0 = 12 o'clock position)
             hour = r.randint(1, 12)
             target_pos = (hour % 12) * steps_per_hour  # hour 12 -> pos 0
@@ -1356,13 +1356,13 @@ def anim_chaos():
 
 def anim_sync():
     # Sync dance: hand sweeps to each hour, flipdots light up in sync
-    ucStatus.text = "Anim: Sync"
     flipsPower(True)
     try:
         setFlips([0, 0, 0, 0], 1, managePower=False)  # Start blank
         goHome()  # Start at 12
         steps_per_hour = STEPS // 12
         for h in range(1, 13):
+            ucStatus.text = "Sync %d/12" % h
             # Move hand to hour position
             multiStep(1, steps_per_hour, STEP_DELAY)
             # Light up matching hour
