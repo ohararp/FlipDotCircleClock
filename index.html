@@ -176,7 +176,12 @@
     setText('flipPower',d.flipdot_power?'ON':'OFF');
     setDot('dotWifi',d.wifi_connected);
     if(d.home_offset !== undefined){setText('calibOffset',d.home_offset);}
-    if(d.step_delay_us !== undefined){setText('currentSpeed',d.step_delay_us);document.getElementById('stepDelaySelect').value=d.step_delay_us;}
+    if(d.step_delay_us !== undefined){
+      setText('currentSpeed',d.step_delay_us);
+      var sel=document.getElementById('stepDelaySelect');
+      var val=String(d.step_delay_us);
+      if(sel.querySelector('option[value="'+val+'"]')){sel.value=val;}
+    }
   }
 
   // HTTP polling for status updates
@@ -284,7 +289,10 @@
     fetch('/set_speed',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({delay_us:delay_us})})
       .then(function(r){return r.json();})
       .then(function(d){
-        if(d.ok){document.getElementById('currentSpeed').textContent=d.delay_us+' (saved)';}
+        if(d.ok){
+          document.getElementById('currentSpeed').textContent=d.delay_us+' (saved)';
+          document.getElementById('stepDelaySelect').value=String(d.delay_us);
+        }
         setTimeout(function(){fetchLog();},500);
       }).catch(function(){});
   });
