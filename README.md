@@ -359,20 +359,33 @@ Three momentary push buttons provide manual control without needing WiFi or the 
 
 **Note**: This modifies the battery-backed RTC, so the change persists across power cycles.
 
-### Button C - Increment Minute (IO33)
+### Button C - Increment Minute / AS5600 Calibration (IO33)
 
-**Action**: Adds 1 minute to the RTC time and updates the minute hand
+**Short Press**: Adds 1 minute to the RTC time and updates the minute hand
 
 **Sequence**:
 1. Increments the RTC minute by 1 (wraps from 59 to 0, does not carry to hours)
 2. Moves the minute hand to the new minute position
 
+**Long Press (2 seconds)**: Enters AS5600 calibration mode
+
+**Calibration Sequence**:
+1. OLED shows "CAL: Move to 12"
+2. Motor disables - user can manually rotate the minute hand
+3. Position the hand exactly at 12 o'clock
+4. Long-press C again to confirm
+5. AS5600 angle is saved to NVM (persists across reboots)
+6. OLED shows "CAL: Saved!" and hand moves to current minute
+
 **Use Cases**:
 - Fine-tuning the time during initial setup
 - Testing minute hand movement
 - Verifying AS5600 closed-loop correction (if installed)
+- Quick AS5600 calibration without web interface
 
 **Note**: Minutes do not carry over to hours when wrapping from 59 to 0. Use Button B to adjust hours separately.
+
+**Note**: The AS5600 calibration saved via Button C overrides the automatic AS5600 capture during `findExactHome()`. To clear the saved calibration, use the web UI reset or clear NVM bytes 6-7.
 
 ### Button Behavior Notes
 
@@ -480,13 +493,32 @@ When AS5600 is available, the `/status.json` endpoint includes:
 
 ## Home Position Calibration
 
-If the minute hand doesn't align exactly at 12 o'clock after homing, use the web UI calibration controls to fine-tune:
+If the minute hand doesn't align exactly at 12 o'clock after homing, you can calibrate using either the physical button or web interface.
+
+### Button Calibration (AS5600)
+
+1. **Long-press Button C** (2 seconds) - motor disables, OLED shows "CAL: Move to 12"
+2. **Manually rotate** the minute hand to point exactly at 12 o'clock
+3. **Long-press Button C again** - saves AS5600 angle to NVM, hand moves to current minute
+
+This method saves the AS5600 absolute angle for 12 o'clock. On subsequent startups, this saved calibration is used instead of recapturing the AS5600 angle during `findExactHome()`.
+
+### Web UI Calibration (Step Offset)
 
 1. Click **Calibrate** - homes the motor and stays at 12 o'clock position
 2. Use **+ CW** / **- CCW** buttons to nudge the hand until it points exactly at 12
 3. Click **Set Home** - saves the offset to NVM (persists across reboots)
 
-The offset (range: ±1056 steps, ~30 degrees) is automatically applied after every homing operation. Click **Reset** to clear the offset back to zero.
+The step offset (range: ±1056 steps, ~30 degrees) is automatically applied after every homing operation. Click **Reset** to clear the offset back to zero.
+
+### Which Method to Use?
+
+| Method | Best For | Stored In |
+|--------|----------|-----------|
+| **Button C** | Quick setup, AS5600 installed | NVM bytes 6-7 (AS5600 angle) |
+| **Web UI** | Fine-tuning, no AS5600 | NVM bytes 2-3 (step offset) |
+
+Both methods persist across power cycles. The button method is faster but requires an AS5600 sensor.
 
 ## Motor Speed Configuration
 
