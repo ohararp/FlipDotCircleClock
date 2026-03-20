@@ -1181,7 +1181,7 @@ def goHome(tolerance=15):
     multiStep(1, cw_steps, STEP_DELAY)
 
     # Fine-tune with AS5600 closed-loop
-    moveToAngle(target, tolerance)
+    #moveToAngle(target, tolerance)
 
     stepNow = 0
     print("goHome: At home")
@@ -1331,7 +1331,7 @@ def anim_demo():
     flipsPower(True)
     try:
         # Sweep minute hand full rotation
-        multiStep(1, STEPS, STEP_DELAY)
+        goHome()
         # Count through hours 1-12
         for h in range(1, 13):
             setFlips(hourIn(h), 1, managePower=False)
@@ -1392,7 +1392,7 @@ def anim_sync():
     flipsPower(True)
     try:
         setFlips([0, 0, 0, 0], 1, managePower=False)  # Start blank
-        findExactHome()  # Start at 12
+        goHome()  # Start at 12
         steps_per_hour = STEPS // 12
         for h in range(1, 13):
             # Move hand to hour position
