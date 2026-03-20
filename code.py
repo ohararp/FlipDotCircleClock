@@ -882,12 +882,18 @@ def moveToAngle(target_raw, tolerance=15, max_steps=1000):
     # tolerance: acceptable error in raw units (~1.3° at tolerance=15)
     # max_steps: safety limit to prevent infinite loops
     # Returns True if target reached, False if AS5600 unavailable or max_steps exceeded.
+    #
+    # Uses batched stepping to reduce I2C overhead and eliminate jerkiness:
+    # - Bulk moves: take multiple steps without reading sensor
+    # - Fine-tune: single steps only when close to target
     if not as5600_sensor:
         return False
 
     try:
         en.value = motorEnabled
         steps_taken = 0
+        # AS5600-to-step ratio: ~3.125 steps per AS5600 unit (12800/4096)
+        STEPS_PER_AS5600 = STEPS / 4096
 
         while steps_taken < max_steps:
             current = read_as5600_angle()
@@ -895,20 +901,37 @@ def moveToAngle(target_raw, tolerance=15, max_steps=1000):
                 return False
 
             diff = as5600_angle_diff(current, target_raw)
+            abs_diff = abs(diff)
 
-            if abs(diff) <= tolerance:
+            if abs_diff <= tolerance:
                 # Update stepNow from AS5600 for consistency with open-loop tracking
                 global stepNow
                 stepNow = as5600_to_steps(current)
                 return True
 
-            # Step in the appropriate direction (diff > 0 means CW needed)
+            # Determine step direction (diff > 0 means CW needed)
             direction = 1 if diff > 0 else 0
-            oneStep(direction, STEP_DELAY)
-            steps_taken += 1
+
+            # Choose batch size based on distance to target
+            # Larger batches for far distances, smaller for fine-tuning
+            if abs_diff > 200:  # Far away: batch 50 steps (~16 AS5600 units)
+                batch_size = 50
+            elif abs_diff > 50:  # Medium distance: batch 15 steps
+                batch_size = 15
+            elif abs_diff > tolerance * 2:  # Close: batch 5 steps
+                batch_size = 5
+            else:  # Very close: single step fine-tuning
+                batch_size = 1
+
+            # Take batched steps without reading sensor between them
+            for _ in range(batch_size):
+                oneStep(direction, STEP_DELAY)
+                steps_taken += 1
+                if steps_taken >= max_steps:
+                    break
 
             # Poll server occasionally to keep web responsive
-            if steps_taken % 50 == 0:
+            if steps_taken % 100 == 0:
                 pollServer()
 
         print(f"moveToAngle: max_steps exceeded, diff={diff}")
@@ -1139,7 +1162,6 @@ def screenUpdate():
 #%%----------------------------------------------------------------------------
 def minUpdate():
     """Move minute hand to current minute using AS5600 with CW-only bulk movement."""
-    print("Updating Dial and Flip Dot")
     t = rtc.datetime
     target_minute = t.tm_min
     global stepNow
@@ -1154,39 +1176,37 @@ def minUpdate():
         # Calculate CW distance in AS5600 units
         cw_as5600 = (target_angle - current) % 4096
 
-        # Check if already close (either direction) - use moveToAngle for small corrections
+        # Check if already close (either direction)
         min_distance = min(cw_as5600, 4096 - cw_as5600)
+
         if min_distance < 15:  # tolerance - already at target
-            print("minUpdate: Already at target (AS5600=%d, target=%d)" % (current, target_angle))
-            stepNow = int(round(target_minute / 60.0 * STEPS)) % STEPS
-            return
-
-        # If close but not exact, just fine-tune (avoids full revolution for small CCW errors)
-        if min_distance < 100:
+            print("minUpdate: At target (AS5600=%d, target=%d)" % (current, target_angle))
+        elif min_distance < 68:  # ~6 degrees - small correction only (~1 minute of movement)
             print("minUpdate: Small correction (AS5600=%d, target=%d, diff=%d)" % (current, target_angle, min_distance))
+            ucStatus.text = "Min Update..."
             moveToAngle(target_angle, tolerance=15)
-            stepNow = int(round(target_minute / 60.0 * STEPS)) % STEPS
-            return
-
-        # Convert to steps and move CW
-        cw_steps = int(cw_as5600 * STEPS / 4096)
-        print("%d -> %d, moving %d steps CW" % (current, target_angle, cw_steps))
-        multiStep(1, cw_steps, STEP_DELAY)
-
-        # Fine-tune with moveToAngle (small corrections can be CW or CCW)
-        moveToAngle(target_angle, tolerance=15)
+        else:
+            # Bulk CW movement + fine-tune
+            cw_steps = int(cw_as5600 * STEPS / 4096)
+            print("minUpdate: %d -> %d, moving %d steps CW" % (current, target_angle, cw_steps))
+            ucStatus.text = "Min Update..."
+            multiStep(1, cw_steps, STEP_DELAY)
+            moveToAngle(target_angle, tolerance=15)
 
         # Sync stepNow with target
         stepNow = int(round(target_minute / 60.0 * STEPS)) % STEPS
     else:
-        # Fallback: open-loop step counting (existing behavior)
+        # Fallback: open-loop step counting
+        print("minUpdate: Open-loop fallback")
         stepNow %= STEPS
         minSteps = int(round(target_minute / 60.0 * STEPS)) % STEPS
         stepsNeeded = (minSteps - stepNow) % STEPS
         print("%d %d %d (CW)" % (minSteps, stepNow, stepsNeeded))
         if stepsNeeded > 0:
+            ucStatus.text = "Min Update..."
             multiStep(1, stepsNeeded, STEP_DELAY)
-
+        stepNow = minSteps
+#%%----------------------------------------------------------------------------
 def hrUpdate(forceHour=False):
     # Move minute hand and force flipdot blank then hour refresh.
     print("hrUpdate()-Updating Flip Dot Hours")
@@ -1229,7 +1249,7 @@ def anim_demo():
     finally:
         extendFlipPowerWindow()
     # Restore time
-    findExactHome()
+    goHome()
     hrUpdate(forceHour=True)
     minUpdate()
 
@@ -1237,7 +1257,7 @@ def anim_chase():
     # Chase pattern: flipdots ripple, hand follows
     flipsPower(True)
     try:
-        findExactHome()  # Start at 12
+        goHome()  # Start at 12
         steps_per_hour = STEPS // 12
         for h in range(1, 13):
             # Move hand to hour position
@@ -1251,7 +1271,7 @@ def anim_chase():
     finally:
         extendFlipPowerWindow()
     # Restore time
-    findExactHome()
+    goHome()
     hrUpdate(forceHour=True)
     minUpdate()
 
@@ -1263,11 +1283,11 @@ def anim_chaos():
             setFlips(hourIn(r.randint(0, 12)), 1, managePower=False)
             # Oscillate hand randomly
             multiStep(r.choice([0, 1]), r.randint(20, 100), STEP_DELAY)
-            time.sleep(0.08)
+            time.sleep(0.25)
     finally:
         extendFlipPowerWindow()
     # Restore time
-    findExactHome()
+    goHome()
     hrUpdate(forceHour=True)
     minUpdate()
 
@@ -1287,7 +1307,7 @@ def anim_sync():
     finally:
         extendFlipPowerWindow()
     # Restore time
-    findExactHome()
+    goHome()
     hrUpdate(forceHour=True)
     minUpdate()
 
