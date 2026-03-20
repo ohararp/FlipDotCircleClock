@@ -1041,8 +1041,8 @@ def findExactHome(delay=None, apply_offset=True, skip_as5600_capture=False):
     while not hallStable(False):
         oneStep(1, delay)
         step_count += 1
-        if step_count % 100 == 0:
-            pollServer()
+        # if step_count % 100 == 0:
+        #     pollServer()
 
     # Step 2: Reverse until hall releases (precise edge A)
     print('Step 2: Finding edge A (release point)')
@@ -1051,8 +1051,8 @@ def findExactHome(delay=None, apply_offset=True, skip_as5600_capture=False):
     while not hallStable(True):
         oneStep(0, delay)
         step_count += 1
-        if step_count % 100 == 0:
-            pollServer()
+    #     if step_count % 100 == 0:
+    #         pollServer()
     edge_a = stepNow
     print('Edge A at step: %d' % edge_a)
 
@@ -1063,8 +1063,8 @@ def findExactHome(delay=None, apply_offset=True, skip_as5600_capture=False):
     while not hallStable(False):
         oneStep(0, delay)
         step_count += 1
-        if step_count % 100 == 0:
-            pollServer()
+        # if step_count % 100 == 0:
+        #     pollServer()
 
     # Step 4: Reverse again (forward) until hall releases (precise edge B)
     print('Step 4: Finding edge B (release point)')
@@ -1073,8 +1073,8 @@ def findExactHome(delay=None, apply_offset=True, skip_as5600_capture=False):
     while not hallStable(True):
         oneStep(1, delay)
         step_count += 1
-        if step_count % 100 == 0:
-            pollServer()
+        # if step_count % 100 == 0:
+        #     pollServer()
     edge_b = stepNow
     print('Edge B at step: %d' % edge_b)
 
