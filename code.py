@@ -133,9 +133,8 @@ lastHourShown = None
 as5600_sensor = None
 as5600_home_offset = 0  # AS5600 raw value at 12 o'clock - auto-detected after homing
 
-# Calibration tracking (for interactive calibration via web UI)
-calibration_steps = 0  # Tracks nudges during calibration session
-calibration_mode = False  # True when in button calibration mode (Button C long-press)
+# Calibration mode (Button C long-press or web UI)
+calibration_mode = False  # True when in calibration mode - motor disabled for manual positioning
  
 # Stepper Motor Setup
 motorEnabled  = False   # active-low
@@ -2086,63 +2085,45 @@ def setupWebServer(pool):
         minUpdate()  # Return to current time
         return Response(request, body='{"ok":true}', content_type="application/json")
 
-    @server.route("/calibrate", POST)
-    def calibrate_route(request: Request):
-        # Home motor to raw magnet center for calibration (don't apply stored offset)
-        global calibration_steps
-        calibration_steps = 0  # Reset nudge counter
-        log_action("Calibration started")
-        findExactHome(apply_offset=False)  # Go to raw center
-        # Don't call minUpdate - stay at 12 o'clock for adjustment
+    @server.route("/cal_start", POST)
+    def cal_start_route(request: Request):
+        # Enter calibration mode - disable motor for manual positioning
+        enter_calibration_mode()
+        log_action("Calibration mode started")
         as5600_angle = read_as5600_angle()
-        return Response(request, body='{"ok":true,"offset":0,"nudged":0,"as5600":%s}' % (as5600_angle if as5600_angle else "null"), content_type="application/json")
+        return Response(request, body='{"ok":true,"as5600":%s}' % (as5600_angle if as5600_angle else "null"), content_type="application/json")
 
-    @server.route("/nudge_cw", POST)
-    def nudge_cw_route(request: Request):
-        # Nudge hand clockwise (50 steps = ~1.4 degrees visible movement)
-        global calibration_steps
-        nudge_steps = 50
-        multiStep(1, nudge_steps, STEP_DELAY)
-        calibration_steps += nudge_steps
-        as5600_angle = read_as5600_angle()
-        return Response(request, body='{"ok":true,"nudged":%d,"as5600":%s}' % (calibration_steps, as5600_angle if as5600_angle else "null"), content_type="application/json")
+    @server.route("/cal_save", POST)
+    def cal_save_route(request: Request):
+        # Save current AS5600 position as 12 o'clock
+        global calibration_mode, as5600_home_offset, stepNow
+        if not calibration_mode:
+            return Response(request, body='{"ok":false,"error":"Not in calibration mode"}', content_type="application/json")
 
-    @server.route("/nudge_ccw", POST)
-    def nudge_ccw_route(request: Request):
-        # Nudge hand counter-clockwise (50 steps = ~1.4 degrees visible movement)
-        global calibration_steps
-        nudge_steps = 50
-        multiStep(0, nudge_steps, STEP_DELAY)
-        calibration_steps -= nudge_steps
-        as5600_angle = read_as5600_angle()
-        return Response(request, body='{"ok":true,"nudged":%d,"as5600":%s}' % (calibration_steps, as5600_angle if as5600_angle else "null"), content_type="application/json")
+        if as5600_sensor and as5600_sensor.magnet_detected:
+            angle = read_as5600_angle()
+            if angle is not None:
+                as5600_home_offset = angle
+                save_as5600_cal_nvm(angle)
+                log_action("AS5600 calibration saved: %d" % angle)
+                calibration_mode = False
+                en.value = motorEnabled
+                stepNow = 0
+                minUpdate()
+                return Response(request, body='{"ok":true,"as5600_offset":%d}' % angle, content_type="application/json")
+            else:
+                return Response(request, body='{"ok":false,"error":"AS5600 read failed"}', content_type="application/json")
+        else:
+            return Response(request, body='{"ok":false,"error":"No magnet detected"}', content_type="application/json")
 
-    @server.route("/set_home", POST)
-    def set_home_route(request: Request):
-        # Save nudge count as new home offset (replaces previous offset)
-        global calibration_steps, as5600_home_offset
-        save_home_offset_nvm(calibration_steps)
-        log_action("Home offset set to %d steps" % calibration_steps)
-        saved_offset = calibration_steps
-        calibration_steps = 0
-        # Update AS5600 home offset to current position
-        if as5600_sensor:
-            try:
-                as5600_home_offset = as5600_sensor.angle
-                print(f"AS5600 home offset updated to {as5600_home_offset}")
-            except:
-                pass
-        return Response(request, body='{"ok":true,"offset":%d,"as5600_offset":%d}' % (saved_offset, as5600_home_offset), content_type="application/json")
-
-    @server.route("/reset_calibration", POST)
-    def reset_calibration_route(request: Request):
-        # Reset home offset to zero and re-home
-        global calibration_steps, as5600_home_offset
-        save_home_offset_nvm(0)
-        calibration_steps = 0
-        findExactHome()  # Re-home to update AS5600 offset
-        log_action("Home offset reset to 0")
-        return Response(request, body='{"ok":true,"offset":0,"as5600_offset":%d}' % as5600_home_offset, content_type="application/json")
+    @server.route("/cal_cancel", POST)
+    def cal_cancel_route(request: Request):
+        # Cancel calibration mode without saving
+        global calibration_mode
+        calibration_mode = False
+        en.value = motorEnabled
+        log_action("Calibration cancelled")
+        return Response(request, body='{"ok":true}', content_type="application/json")
 
     @server.route("/get_speed")
     def get_speed_route(request: Request):
