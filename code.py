@@ -237,8 +237,8 @@ TIMEZONES = (
 
 #%%----------------------------------------------------------------------------
 def getBit(value, bitIdx):
-    # Return bit mask of value at bitIdx.
-    return value & (1 << bitIdx)
+    # Return 0 or 1 for bit at bitIdx.
+    return (value >> bitIdx) & 1
 
 #%%----------------------------------------------------------------------------
 def setBit(value, bitIdx):
@@ -851,7 +851,7 @@ def setFlipsCore(dataIn, flagXOR):
                 regData[i] = clrBit(regData[i], resBits[j])
 
     shiftData(regData)
-    oldData = colData
+    oldData = colData[:]  # Copy to avoid reference issues
     return regData
 
 #%%----------------------------------------------------------------------------
@@ -1303,10 +1303,10 @@ def anim_demo():
         # Count through hours 1-12
         for h in range(1, 13):
             ucStatus.text = "Demo %d/12" % h
-            setFlips(hourIn(h), 1, managePower=True)
+            setFlips(hourIn(h), 0, managePower=True)
             time.sleep(1.5)
         # Blank
-        setFlips([0, 0, 0, 0], 1, managePower=True)
+        setFlips([0, 0, 0, 0], 0, managePower=True)
         time.sleep(1.0)
     finally:
         extendFlipPowerWindow()
@@ -1332,7 +1332,7 @@ def anim_chaos():
             target_pos = (hour % 12) * steps_per_hour  # hour 12 -> pos 0
 
             # Display hour on flipdots
-            setFlips(hourIn(hour), 1, managePower=True)
+            setFlips(hourIn(hour), 0, managePower=True)
 
             # Calculate CW-only movement (like minUpdate)
             if target_pos >= current_pos:
@@ -1366,7 +1366,7 @@ def anim_sync():
             # Move hand to hour position
             multiStep(1, steps_per_hour, STEP_DELAY)
             # Light up matching hour
-            setFlips(hourIn(h), 1, managePower=True)
+            setFlips(hourIn(h), 0, managePower=True)
             time.sleep(1.5)
     finally:
         extendFlipPowerWindow()
