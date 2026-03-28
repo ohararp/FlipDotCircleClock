@@ -791,7 +791,7 @@ def serviceFlipPowerWindow():
 def invalidateFlipCache():
     # Force next flip update by invalidating oldData cache.
     global oldData
-    oldData = [255, 255, 255, 255]
+    oldData = [255, 255, 255]
 
 #%%----------------------------------------------------------------------------
 def setFlips(dataIn, flagXOR, managePower=True, forceFull=False, doPrecharge=False):
@@ -814,24 +814,24 @@ def setFlips(dataIn, flagXOR, managePower=True, forceFull=False, doPrecharge=Fal
 
 #%%----------------------------------------------------------------------------
 def setFlipsCore(dataIn, flagXOR):
-    # Build 4x12-bit register words and shift them to hardware.
+    # Build 3x12-bit register words and shift them to hardware.
     global oldData
 
     try:
         oldData
     except NameError:
-        oldData = [255, 255, 255, 255]
+        oldData = [255, 255, 255]
 
     supBits = [0, 3, 6, 9]
     setBits = [1, 4, 7, 10]
     resBits = [2, 5, 8, 11]
 
-    xorData = [0, 0, 0, 0]
-    regData = [0, 0, 0, 0]
+    xorData = [0, 0, 0]
+    regData = [0, 0, 0]
 
-    colData = [dataIn[3], dataIn[2], dataIn[1], dataIn[0]]
+    colData = [dataIn[2], dataIn[1], dataIn[0]]
 
-    for i in range(0, 4):
+    for i in range(0, 3):
         xorData[i] = colData[i] ^ oldData[i]
         for j in range(0, 4):
             xorIdx = getBit(xorData[i], j)
@@ -851,9 +851,9 @@ def setFlipsCore(dataIn, flagXOR):
                 regData[i] = clrBit(regData[i], resBits[j])
 
     # Stagger columns with delay to avoid inrush current brownout.
-    for i in range(0, 4):
+    for i in range(0, 3):
         if regData[i] != 0:
-            staggered = [0, 0, 0, 0]
+            staggered = [0, 0, 0]
             staggered[i] = regData[i]
             shiftData(staggered)
             time.sleep(0.1)
@@ -1286,7 +1286,7 @@ def hrUpdate(forceHour=False):
         ucStatus.text = "Updating Hour..."
         flipsPower(True)
         try:
-            setFlips([0, 0, 0, 0], 1, managePower=False)   # force black
+            setFlips([0, 0, 0], 1, managePower=False)   # force black
             time.sleep(flipdotDelay)
 
             setFlips(hourIn(hr12), 1, managePower=False)  # force hour
@@ -1313,7 +1313,7 @@ def anim_demo():
             setFlips(hourIn(h), 0, managePower=True)
             time.sleep(1.5)
         # Blank
-        setFlips([0, 0, 0, 0], 0, managePower=True)
+        setFlips([0, 0, 0], 0, managePower=True)
         time.sleep(1.0)
     finally:
         extendFlipPowerWindow()
@@ -1365,7 +1365,7 @@ def anim_sync():
     # Sync dance: hand sweeps to each hour, flipdots light up in sync
     flipsPower(True)
     try:
-        setFlips([0, 0, 0, 0], 1, managePower=True)  # Start blank
+        setFlips([0, 0, 0], 1, managePower=True)  # Start blank
         goHome()  # Start at 12
         steps_per_hour = STEPS // 12
         for h in range(1, 13):
@@ -1740,7 +1740,7 @@ def hour24ToHour12(hour24):
     return hour12
 #------------------------------------------------------------------------------
 def hourIn(hour):
-    # Map hour number to 4-column flipdot bit patterns.
+    # Map hour number to 3-column flipdot bit patterns.
     if hour > 12:
         hour = hour - 12
 
@@ -1754,28 +1754,28 @@ def hourIn(hour):
     idd2 = 7
     idd3 = 15
 
-    fullIdx = ([[0,0,0,0],   #0
-               [id0,0,0,0],  #1
-               [id1,0,0,0],  #2
-               [id2,0,0,0],  #3
-               [id3,idd0,0,0], #4
-               [id3,idd1,0,0], #5
-               [id3,idd2,0,0], #6
-               [id3,idd3,0,0], #7
-               [id3,idd3,idd0,0], #8
-               [id3,idd3,idd1,0], #9
-               [id3,idd3,idd2,0], #10
-               [id3,idd3,idd3,0], #11
-               [15,15,15,15]]) #12
+    fullIdx = ([[0,0,0],       #0
+               [id0,0,0],    #1
+               [id1,0,0],    #2
+               [id2,0,0],    #3
+               [id3,idd0,0], #4
+               [id3,idd1,0], #5
+               [id3,idd2,0], #6
+               [id3,idd3,0], #7
+               [id3,idd3,idd0], #8
+               [id3,idd3,idd1], #9
+               [id3,idd3,idd2], #10
+               [id3,idd3,idd3], #11
+               [15,15,15]])  #12
     data = fullIdx[hour]
     return data
 
 #%%----------------------------------------------------------------------------
 def shiftData(regData):
-    # Shift 4 words into registers, latch, then clear outputs.
+    # Shift 3 words into registers, latch, then clear outputs.
     oePin.value = OE_ENABLE
 
-    for i in range(0, 4):
+    for i in range(0, 3):
         latchPin.value = False
         simpleio.shift_out(dataPin, clockPin, (regData[i] >> 8), msb_first=True)
         simpleio.shift_out(dataPin, clockPin, regData[i], msb_first=True)
@@ -1784,7 +1784,7 @@ def shiftData(regData):
     latchPin.value = False
     time.sleep(0.005)
 
-    for i in range(0, 4):
+    for i in range(0, 3):
         latchPin.value = False
         simpleio.shift_out(dataPin, clockPin, 0, msb_first=True)
         simpleio.shift_out(dataPin, clockPin, 0, msb_first=True)
@@ -1801,13 +1801,13 @@ def blankDisplay():
 
     flipsPower(True)
     try:
-        setFlips([0, 0, 0, 0], 1, managePower=False)
+        setFlips([0, 0, 0], 1, managePower=False)
         time.sleep(2.5)
 
-        setFlips([15, 15, 15, 15], 1, managePower=False)
+        setFlips([15, 15, 15], 1, managePower=False)
         time.sleep(2.5)
 
-        setFlips([0, 0, 0, 0], 1, managePower=False)
+        setFlips([0, 0, 0], 1, managePower=False)
         time.sleep(2.5)
     finally:
         time.sleep(relayHoldS)
