@@ -4,7 +4,7 @@ A CircuitPython-based flip dot clock with a mechanical minute hand, running on U
 
 ## Features
 
-- **Flip Dot Hour Display**: 4-column flip dot display shows the current hour (1-12)
+- **Flip Dot Hour Display**: 3-column, 12-dot flip dot display shows the current hour (1-12)
 - **Mechanical Minute Hand**: Stepper motor-driven minute hand with precision hall sensor homing
 - **NTP Time Sync**: Automatic time synchronization via NTP with timezone, DST support, and hourly resync
 - **OLED Status Display**: 128x64 SH1107 display showing time, WiFi status, and IP address
@@ -34,7 +34,7 @@ Both boards use the same pin layout - the code auto-detects which board is runni
 
 | Component | Specifications | Purpose | Approx. Cost |
 |-----------|---------------|---------|--------------|
-| **Flip Dot Display** | 4-column flip dot matrix, 24V | Hour display (1-12) | $50-150 |
+| **Flip Dot Display** | 3-column × 4-dot (12 dots), 24V | Hour display (1-12) | $50-150 |
 | **Stepper Motor** | MT-1701HSM140AE or similar, 0.9°/step (400 steps/rev) | Minute hand drive | $10-20 |
 | **Stepper Driver** | TMC2209 (recommended) or A4988/DRV8825 | Motor control with microstepping | $2-10 |
 | **DS3231 RTC Module** | I2C, with CR2032 battery | Battery-backed timekeeping | $3-10 |
@@ -74,7 +74,7 @@ Both boards use the same pin layout - the code auto-detects which board is runni
 
 | Component | Connection | GPIO Pin | Description |
 |-----------|------------|----------|-------------|
-| **Flip Dot Display** | SPI Clock | IO36 (SCK) | Shift register clock |
+| **Flip Dot Display** | SPI Clock | IO36 (SCK) | Shift register clock (6× 74HC4094 daisy-chained) |
 | | SPI Data | IO35 (MOSI) | Serial data to shift registers |
 | | Latch | IO37 | Latches data to outputs |
 | | Output Enable | IO18 | Enables flip dot drivers |
@@ -169,7 +169,7 @@ STEPS = 3200  # A4988 at 8 microsteps × 400 base steps
 | Motor | 5-12V | ~500mA | Stepper driver VCC |
 | Flip Dots | 24V | ~2A peak | External 24V PSU via relay |
 
-**Important**: The relay controls 24V power to the flip dots. The code includes precharge timing to allow capacitors to charge before flipping.
+**Important**: The relay controls 24V power to the flip dots. The code includes precharge timing to allow capacitors to charge before flipping. Columns are staggered with 100ms delay between each to prevent inrush current brownout.
 
 ## Setup
 
@@ -232,6 +232,7 @@ These values can be adjusted at the top of `code.py`:
 relayPrechargeS = 0.20   # seconds to let 24V rails charge
 relayHoldS      = 0.08   # seconds to keep rails up after last flip
 flipdotDelay    = 0.5    # seconds between flipdot actuations (capacitor recharge)
+# Column stagger: 100ms delay between each column to prevent inrush current brownout
 ```
 
 ## Web Interface
