@@ -850,7 +850,14 @@ def setFlipsCore(dataIn, flagXOR):
                 regData[i] = clrBit(regData[i], setBits[j])
                 regData[i] = clrBit(regData[i], resBits[j])
 
-    shiftData(regData)
+    # Stagger columns with delay to avoid inrush current brownout.
+    for i in range(0, 4):
+        if regData[i] != 0:
+            staggered = [0, 0, 0, 0]
+            staggered[i] = regData[i]
+            shiftData(staggered)
+            time.sleep(0.1)
+
     oldData = colData[:]  # Copy to avoid reference issues
     return regData
 
